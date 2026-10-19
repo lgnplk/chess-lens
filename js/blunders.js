@@ -200,8 +200,9 @@ function classifyBlunder(m, fens) {
 const BL_MIN_N = 25; // moves needed in a situation before comparing its blunder rate
 
 function blunderAnatomy(myMoves) {
+  // scans diagnose blunders in their analysis workers (m.diag); only an analysis made elsewhere needs a replay here
   const games = new Map();
-  const replayOf = g => { if (!games.has(g)) games.set(g, replay(g.sans)); return games.get(g); };
+  const fensOf = g => { if (!games.has(g)) games.set(g, replayFens(g.sans).fens); return games.get(g); };
   // time spent on each move, and the typical time per move in that game
   const spentOf = (g, ply) => {
     if (!g.clocks?.length || !g.base || g.clocks[ply] == null) return null;
@@ -218,19 +219,21 @@ function blunderAnatomy(myMoves) {
     return typical.get(g);
   };
   const moves = myMoves.filter(m => m.cls !== 'book' && m.cls !== 'forced').map(m => {
-    const rp = replayOf(m.game), prev = rp.moves[m.ply - 1];
+    const prev = m.game.sans[m.ply - 1] || '';
     const spent = spentOf(m.game, m.ply), typ = typicalOf(m.game);
     return {
       m, blunder: m.loss >= 20,   // a 'miss' only counts when it costs as much as a blunder
       fast: spent != null && typ != null ? spent <= Math.max(2, 0.35 * typ) : null, spent,
       trouble: m.clockFrac != null ? m.clockFrac < 0.1 : null,
       winning: m.wpB >= 75,   // (no "while losing": win-% losses shrink once a game is lost, so it'd measure the scale, not you)
-      afterCapture: !!prev?.captured, afterCheck: !!prev?.san?.includes('+'),
+      afterCapture: prev.includes('x'), afterCheck: prev.includes('+'),
     };
   });
   const list = moves.filter(x => x.blunder).map(x => {
-    let d;
-    try { d = classifyBlunder(x.m, replayOf(x.m.game).fens); } catch { d = { cat: 'positional', line: [], reply: null, lost: null }; }
+    let d = x.m.diag;
+    if (!d) {
+      try { const fens = fensOf(x.m.game); d = { ...classifyBlunder(x.m, fens), fen: fens[x.m.ply] }; } catch { d = { cat: 'positional', line: [], reply: null, lost: null }; }
+    }
     return { ...x, ...d };
   });
   const nGames = new Set(moves.map(x => x.m.game)).size;
@@ -412,7 +415,8 @@ function drawBlDrill(A) {
       <div class="seg" style="align-self:center">${Object.entries(BL_DRILL_MODES).map(([k, v]) => `<button data-blmode="${k}" class="${k === mode ? 'active' : ''}">${v.label} <span class="muted">${A.list.filter(v.pick).length}</span></button>`).join('')}</div></div>
     ${sc.n ? `<p class="small" style="margin:8px 0 0">This session: <b>${sc.ok} of ${sc.n}</b> ${mode === 'win' ? 'found' : 'safe'}.</p>` : ''}`;
   if (!b) { box.innerHTML = head + '<p class="muted">No positions of this kind in the scanned games.</p>'; bindBlModes(A); return; }
-  const fens = replay(b.m.game.sans).fens, fen = fens[b.m.ply];
+  // the position and the move into it: kept by the scan (b.fen, b.last); replayed only for an older analysis
+  const fen = b.fen || (b.fen = replayFens(b.m.game.sans.slice(0, b.m.ply)).fens[b.m.ply]);
   const toMove = b.m.color === 'w' ? 'White' : 'Black';
   const r = bdrill.reveal;
   const what = b.cat === 'missed_mate' ? 'there is a forced mate' : b.cat === 'missed_free' ? 'something is free' : 'there is a winning move';
@@ -425,8 +429,11 @@ function drawBlDrill(A) {
       <div class="match-board" style="--bs:min(380px, calc(100vw - 60px))"><div class="board" id="blBoard"></div></div></div>
     <div class="twin-panel">${r ? r.html : prompt}</div></div>`;
   bdrill.board = new BoardView($('#blBoard'), { onMove: mv => blDrillAnswer(b, fen, mv, mode) });
-  const prev = b.m.ply > 0 ? new Chess(fens[b.m.ply - 1]).move(b.m.game.sans[b.m.ply - 1], { sloppy: true }) : null;
-  bdrill.board.set({ fen, orientation: b.m.color === 'w' ? 'white' : 'black', lastMove: prev && { from: prev.from, to: prev.to } });
+  if (b.last === undefined) {
+    const fens = replayFens(b.m.game.sans.slice(0, b.m.ply)).fens, pm = b.m.ply > 0 ? new Chess(fens[b.m.ply - 1]).move(b.m.game.sans[b.m.ply - 1], { sloppy: true }) : null;
+    b.last = pm ? { from: pm.from, to: pm.to } : null;
+  }
+  bdrill.board.set({ fen, orientation: b.m.color === 'w' ? 'white' : 'black', lastMove: b.last });
   $('#blNext')?.addEventListener('click', () => { bdrill.idx[mode] = (bdrill.idx[mode] + 1) % list.length; bdrill.reveal = null; drawBlDrill(A); });
   bindBlModes(A);
 }
