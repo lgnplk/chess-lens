@@ -3,7 +3,8 @@
 // relay that serve.js does in development) and runs native Stockfish processes for the page (see preload.js).
 //   npm start        run from source (uses ../site and ./stockfish)
 //   npm run dist     build the Windows installer into dist/
-const { app, BrowserWindow, ipcMain, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Menu, dialog } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -118,6 +119,7 @@ async function createWindow() {
     if ((e.isMainFrame ?? mainFrame) && !(e.isSameDocument ?? inPlace)) killAll();
   });
   win.loadURL(`http://127.0.0.1:${port}/`);
+  return win;
 }
 
 Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -125,6 +127,20 @@ Menu.setApplicationMenu(Menu.buildFromTemplate([
   { label: 'View', submenu: [{ role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }, { type: 'separator' }, { role: 'togglefullscreen' }, { role: 'toggleDevTools' }] },
 ]));
 
-app.whenReady().then(createWindow);
+// Updates: the installed app checks this project's GitHub releases at start-up, downloads a newer version in the
+// background, and offers to restart into it. (Only the installed app; running from source never updates.)
+function setupUpdates(win) {
+  if (!app.isPackaged || process.env.CL_PROFILE) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.on('update-downloaded', async info => {
+    const r = await dialog.showMessageBox(win, { type: 'info', buttons: ['Restart now', 'Later'], defaultId: 0, cancelId: 1,
+      title: 'Chess Lens update', message: `Chess Lens ${info.version} is ready.`, detail: 'Restart to finish updating. Your saved data stays.' });
+    if (r.response === 0) autoUpdater.quitAndInstall();
+  });
+  autoUpdater.on('error', e => console.warn('update check failed:', e?.message));   // offline or no release yet: stay quiet
+  autoUpdater.checkForUpdates().catch(() => {});
+}
+
+app.whenReady().then(async () => { const win = await createWindow(); setupUpdates(win); });
 app.on('window-all-closed', () => { killAll(); app.quit(); });
 app.on('before-quit', killAll);
