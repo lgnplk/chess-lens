@@ -45,10 +45,18 @@ function switchTab(tab) {
   const sec = sectionOf(tab);
   lastInSection[sec] = tab;
   $$('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.sec === sec));
-  $('#subtabs').innerHTML = SECTIONS[sec].map(([t, label]) => `<button data-tab="${t}" class="${t === tab ? 'active' : ''}">${label}</button>`).join('');
-  $$('#subtabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+  // the sub-menu is rebuilt only when the section changes; within a section only the highlight moves
+  const sub = $('#subtabs');
+  if (sub.dataset.sec !== sec) {
+    sub.dataset.sec = sec;
+    sub.innerHTML = SECTIONS[sec].map(([t, label]) => `<button data-tab="${t}">${label}</button>`).join('');
+    $$('#subtabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+  }
+  $$('#subtabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   $$('.tab').forEach(s => s.classList.toggle('hidden', s.id !== 'tab-' + tab));
-  renderTab(tab);
+  // the menu repaints first; heavy pages then render on the next frame instead of blocking the click
+  if (['review', 'bot', 'prepare', 'arena'].includes(tab)) renderTab(tab);
+  else requestAnimationFrame(() => requestAnimationFrame(() => { if (S.tab === tab) renderTab(tab); }));
   if (tab === 'review') showReview(); else hideReview();
   if (tab === 'prepare') maybeBotMove(); else hidePrepare();
   if (tab === 'bot') maybeBotThink(); else hideBot();
@@ -63,8 +71,8 @@ async function loadUser(username) {
   try {
     PLAYER_CACHE.delete(`${username}:${months}`); // an explicit load always fetches fresh games
     const { player, games } = await loadPlayerData(username, months, setStatus);
+    await relabelOpenings(games);
     Object.assign(S, { username, player, games, months, scanAgg: null });
-    store.set('cl:lastUser', username);
     const p = player.profile;
     $('#playerChip').innerHTML = `${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ''}<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.username || username)}</a>${p.title ? ` <span class="pill">${esc(p.title)}</span>` : ''}`;
     $('#welcome').classList.add('hidden');
@@ -101,8 +109,7 @@ function initTheme() {
 // Welcome page: Morphy's Opera Game final position, and a way into the arena without loading anyone
 function initWelcome() {
   new BoardView($('#heroBoard')).set({ fen: '1n1Rkb1r/p4ppp/4q3/4p1B1/4P3/8/PPP2PPP/2K5 b k - 1 17', orientation: 'white', lastMove: { from: 'd1', to: 'd8' } });
-  $('#heroLegends').innerHTML = '<span class="lr-label">In the arena</span>' + FAMOUS.filter(f => ['morphy', 'tal', 'fischer', 'kasparov', 'carlsen'].includes(f.id))
-    .map(f => `<span title="${esc(f.name)}">${avatarHtml({ name: f.name, hue: f.hue, size: 36, crown: /World Champion/.test(f.era) })}</span>`).join('');
+
   $('#guestArena').onclick = () => {
     document.body.classList.add('guest');
     $('#welcome').classList.add('hidden');
@@ -119,10 +126,10 @@ function init() {
   $('#loadForm').addEventListener('submit', e => { e.preventDefault(); loadUser($('#username').value); });
   ['#fTime', '#fColor', '#fRated'].forEach(s => $(s).addEventListener('change', () => { gamesState.page = 0; applyFilters(); }));
   $$('#tabs button').forEach(b => b.addEventListener('click', () => switchTab(lastInSection[b.dataset.sec] || firstTab(b.dataset.sec))));
-  const last = store.get('cl:lastUser');
+  // the username box starts empty: nothing is remembered between launches (?user=<name> still pre-loads one)
+  store.set('cl:lastUser', null);
   const qp = new URLSearchParams(location.search).get('user');
-  if (qp || last) $('#username').value = qp || last;
-  if (qp) loadUser(qp);
+  if (qp) { $('#username').value = qp; loadUser(qp); }
 }
 
 init();

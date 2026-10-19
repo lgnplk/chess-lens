@@ -85,19 +85,98 @@ function styleDims(counts) {
 
 const isTrait = d => Math.abs(d.z) >= STYLE_Z && Math.abs(d.h) >= STYLE_H;
 
-// A title from the strongest clear traits (by size of the difference, not just certainty), with evidence
-function styleTitle(dims) {
+// ---------- archetypes: recognisable ways of playing, each defined by which measured traits it needs ----------
+// rules: [dimension, direction (+1 = more than opponents, −1 = less), weight]. A player matches an archetype by
+// how strongly their clear traits point the same way; `solo` archetypes rest on one trait, the rest need two.
+const ARCHETYPES = [
+  // attacking
+  { id: 'romantic', name: 'Romantic', group: 'Attacking', rules: [['sac', 1, 2], ['forcing', 1, 1], ['trade', -1, .5], ['checks', 1, .5]],
+    desc: 'Goes for sacrifices and forcing play over safe, equal moves.' },
+  { id: 'sacrificer', name: 'Trigger-happy sacrificer', group: 'Attacking', rules: [['sac', 1, 2], ['captures', 1, 1.5], ['trade', -1, .5]],
+    desc: 'Takes material and gives it up readily; most of the game is captures.' },
+  { id: 'hunter', name: 'King hunter', group: 'Attacking', rules: [['checks', 1, 2], ['storm', 1, 1.5], ['forcing', 1, 1]],
+    desc: 'Aims everything at the enemy king: checks, pawn pushes, forcing moves.' },
+  { id: 'brawler', name: 'Opposite-wing brawler', group: 'Attacking', rules: [['storm', 1, 2], ['castleLong', 1, 1.5], ['pawns', 1, .5]],
+    desc: 'Castles long and throws the pawns forward: a race of attacks.' },
+  { id: 'tactician', name: 'Tactician', group: 'Attacking', rules: [['captures', 1, 1.5], ['forcing', 1, 1.5], ['checks', 1, .5]],
+    desc: 'Looks for forcing, concrete play: captures and checks over quiet moves.' },
+  { id: 'raider', name: 'Early-queen raider', group: 'Attacking', rules: [['earlyQueen', 1, 2], ['castleEarly', -1, 1], ['forcing', 1, .5]],
+    desc: 'Brings the queen out early and is in no hurry to castle.' },
+  // controlling
+  { id: 'technician', name: 'Technician', group: 'Controlling', rules: [['trade', 1, 2], ['storm', -1, 1], ['sac', -1, .5]],
+    desc: 'Trades pieces to simplify, then wins the clean position.' },
+  { id: 'squeezer', name: 'Space-gaining strategist', group: 'Controlling', rules: [['pawns', 1, 1.5], ['forcing', -1, 1], ['castleEarly', 1, .5]],
+    desc: 'Grabs space with pawns and builds slowly rather than forcing matters.' },
+  { id: 'maneuverer', name: 'Patient maneuverer', group: 'Controlling', rules: [['forcing', -1, 2], ['captures', -1, 1.5], ['checks', -1, 1], ['trade', -1, .5]],
+    desc: 'Improves piece by piece; captures and checks come late.' },
+  { id: 'classicist', name: 'Classicist', group: 'Controlling', rules: [['castleEarly', 1, 1.5], ['earlyQueen', -1, 1], ['storm', -1, 1], ['sac', -1, .5]],
+    desc: 'Develops, castles early and avoids early adventures.' },
+  { id: 'complicator', name: 'Tension-keeper', group: 'Controlling', rules: [['trade', -1, 2], ['captures', -1, .5], ['sac', 1, .5]],
+    desc: 'Declines trades and keeps the position complicated.' },
+  { id: 'pragmatist', name: 'Materialist', group: 'Controlling', rules: [['sac', -1, 2], ['forcing', -1, .5], ['trade', 1, .5]],
+    desc: 'Rarely gives up material, even when a sacrifice would be sound.' },
+  { id: 'improviser', name: 'Improviser', group: 'Flexible', rules: [['castleEarly', -1, 2], ['earlyQueen', 1, .5], ['pawns', -1, .5]],
+    desc: 'Leaves the king in the centre and decides on the fly.' },
+  { id: 'loyalist', name: 'Kingside loyalist', group: 'Flexible', rules: [['castleLong', -1, 2], ['castleEarly', 1, .5]],
+    desc: 'Almost always castles short.' },
+  // on the clock
+  { id: 'speed', name: 'Speed player', group: 'On the clock', solo: true, rules: [['clockLead', 1, 2], ['timeTrouble', -1, 1]],
+    desc: 'Plays fast and finishes with time to spare.' },
+  { id: 'thinker', name: 'Deep thinker', group: 'On the clock', solo: true, rules: [['timeTrouble', 1, 2], ['clockLead', -1, 1.5]],
+    desc: 'Spends the clock on hard decisions and often ends up short of time.' },
+  { id: 'gambler', name: 'Clock gambler', group: 'On the clock', rules: [['timeTrouble', 1, 1.5], ['sac', 1, 1], ['forcing', 1, 1]],
+    desc: 'Plays sharp and fast-and-loose, often with seconds left.' },
+  // temperament
+  { id: 'fighter', name: 'Never-say-die fighter', group: 'Temperament', solo: true, rules: [['resign', -1, 2]],
+    desc: 'Plays lost positions to the end instead of resigning.' },
+  { id: 'realist', name: 'Realist', group: 'Temperament', solo: true, rules: [['resign', 1, 2]],
+    desc: 'Resigns lost games early rather than playing on.' },
+];
+const ARCH_MIN_SCORE = 0.15;
+
+// Credit per rule: a clear trait (z ≥ 2.5, h ≥ 0.1) counts in full; one that leans the same way (z ≥ 1.5, h ≥ 0.12) at half;
+// a single large effect (h ≥ 0.3, z ≥ 1.5), or h ≥ 0.15 with z ≥ 1.8 on the archetype's defining trait, is enough alone. A clear trait the other way counts against.
+function matchArchetypes(dims) {
+  const out = [];
+  for (const a of ARCHETYPES) {
+    let score = 0, clear = 0, lean = 0, big = false;
+    for (const [key, dir, w] of a.rules) {
+      const d = dims[key];
+      if (!d) continue;
+      const signed = dir * d.h;
+      if (isTrait(d)) {
+        if (signed > 0) { score += w * Math.min(signed, 0.7); clear++; } else score -= w * Math.min(-signed, 0.4);
+      } else if (Math.abs(d.z) >= 1.5 && Math.abs(d.h) >= 0.12) {
+        if (signed > 0) {
+          score += w * Math.min(signed, 0.7) * 0.5; lean++;
+          // one large effect, or a moderate one on the archetype's defining trait (weight 2), is enough on its own
+          if ((signed >= 0.3 && Math.abs(d.z) >= 1.5) || (w >= 2 && signed >= 0.15 && Math.abs(d.z) >= 1.8)) big = true;
+        }
+        else score -= w * Math.min(-signed, 0.4) * 0.25;
+      }
+    }
+    const need = a.solo ? 1 : 2;
+    if ((clear >= need || clear + lean >= need || big) && score >= ARCH_MIN_SCORE) out.push({ a, score, confident: clear >= need });
+  }
+  return out.sort((x, y) => y.score - x.score);
+}
+
+// extra: { brilliants, oppBrilliants } from an engine scan; many verified brilliant moves make a romantic "Brilliant"
+function styleTitle(dims, extra = {}) {
   const sig = Object.values(dims).filter(isTrait).sort((a, b) => Math.abs(b.h) - Math.abs(a.h));
-  const words = sig.map(d => { const m = STYLE_DIMS[d.key][d.effect > 0 ? 'plus' : 'minus']; return { d, adj: m[0], noun: m[1] }; }).filter(w => w.adj || w.noun);
-  const nounW = words.find(w => w.noun);
-  // the adjective comes from a different trait than the noun, and shouldn't repeat it ("Harassing king hunter" + storm)
-  const adjW = words.find(w => w !== nounW && w.adj && w.noun !== nounW?.noun) || (nounW?.adj ? nounW : null);
-  // close calls: big differences that need more games to confirm
+  const matches = matchArchetypes(dims);
+  const top = matches[0];
   const close = Object.values(dims).filter(d => !isTrait(d) && Math.abs(d.h) >= 0.2 && Math.abs(d.z) >= 1.5).sort((a, b) => Math.abs(b.h) - Math.abs(a.h));
-  const lean = close.map(d => STYLE_DIMS[d.key][d.effect > 0 ? 'plus' : 'minus'][0]).find(Boolean);
-  let title;
-  if (!words.length) title = Object.keys(dims).length < 4 ? 'Not enough data yet' : lean ? `Balanced, leaning ${lean.toLowerCase()}` : 'Well-rounded player';
-  else title = [adjW?.adj, nounW ? nounW.noun : 'player'].filter(Boolean).join(' ').replace(/^./, c => c.toUpperCase());
+  const measured = Object.keys(dims).length;
+  let title, archetype = null;
+  if (top) {
+    const brilliant = (top.a.id === 'romantic' || top.a.id === 'sacrificer') && (extra.brilliants || 0) >= 2 && (extra.brilliants || 0) > (extra.oppBrilliants || 0);
+    archetype = { id: top.a.id, name: top.a.name, group: top.a.group, desc: top.a.desc, confident: top.confident };
+    title = brilliant ? `Brilliant ${top.a.name.replace(/^./, c => c.toLowerCase())}` : top.a.name;
+  } else if (measured < 4) title = 'Not enough data yet';
+  else { title = 'All-rounder'; archetype = { id: 'allrounder', name: 'All-rounder', group: '', confident: true, desc: 'No habit stands out from your opponents’: you play like the field.' }; }
+  // other archetypes that fit, as a share of the best fit
+  const blend = matches.slice(1, 4).map(m => ({ id: m.a.id, name: m.a.name, fit: Math.round(100 * m.score / top.score) })).filter(b => b.fit >= 40);
   const evidence = sig.slice(0, 5).map(d => {
     const m = STYLE_DIMS[d.key], lo = Math.min(d.p1, d.p2), dp = lo > 0 && lo < 0.1 ? 1 : 0;
     return { key: d.key, label: m.label, up: d.effect > 0, z: d.z, h: d.h,
@@ -107,8 +186,11 @@ function styleTitle(dims) {
     const m = STYLE_DIMS[d.key], adj = m[d.effect > 0 ? 'plus' : 'minus'][0];
     return `${(adj || m.label).toLowerCase()} (${pct(d.p1, d.p1 < 0.1 ? 1 : 0)} vs ${pct(d.p2, d.p2 < 0.1 ? 1 : 0)})`;
   });
-  return { title, evidence, dims, hints, significant: sig.length, measured: Object.keys(dims).length };
+  return { title, archetype, blend, evidence, dims, hints, significant: sig.length, measured };
 }
+
+// brilliant-move counts for the title, from an engine scan's style (aggregateScan(...).style)
+const styleExtra = style => (style ? { brilliants: style.me.brilliants, oppBrilliants: style.opp.brilliants } : {});
 
 // ---------- famous players' fingerprints (js/famous-profiles.json, from their OTB games) ----------
 let _famousProfiles = null;

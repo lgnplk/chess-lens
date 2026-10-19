@@ -276,8 +276,8 @@ function scoreMoves({ fens, moves, phases, legal, evals, clocks, base, book }) {
     const loss = Math.max(0, wpB - wpA);
     const cpLoss = clamp(Math.max(0, before - after), 0, 1000);
     const best = evals[i].best;
-    const bookHit = book && book.get(posKey(fens[i + 1]));
-    if (bookHit) opening = bookHit;
+    const hitHere = book && bookHit(book, fens[i + 1]);
+    if (hitHere) opening = hitHere;
     let cls;
     if (best && uci === best) cls = 'best';
     else if (loss < 2) cls = 'excellent';
@@ -288,7 +288,7 @@ function scoreMoves({ fens, moves, phases, legal, evals, clocks, base, book }) {
     const prev = out[i - 1];
     if (prev && (prev.cls === 'mistake' || prev.cls === 'blunder') && loss >= 10 && wpB > 60) cls = 'miss';
 
-    if (inBook && bookHit) cls = 'book';
+    if (inBook && hitHere) cls = 'book';
     else {
       inBook = false;
       if (legal[i] === 1) cls = 'forced';

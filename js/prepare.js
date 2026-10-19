@@ -248,7 +248,7 @@ function refreshPrepare() {
     if (!book) return;
     let name = null;
     const cc = new Chess();
-    for (const s of prep.line.slice(0, prep.idx)) { cc.move(s); const hit = book.get(keyOf(cc.fen())); if (hit) name = hit; }
+    for (const s of prep.line.slice(0, prep.idx)) { cc.move(s); const hit = bookHit(book, cc.fen()); if (hit) name = hit; }
     const el = $('#prepOpening'); if (el) el.textContent = name ? `· ${name.eco} ${name.name}` : '';
   });
 

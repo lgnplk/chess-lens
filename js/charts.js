@@ -17,7 +17,7 @@ function themeChartDefaults() {
 
 // A chart whose canvas is still on the page is changed in place, so its values glide to their new positions.
 // A new chart appears without the "grow from zero" animation: the canvas fades in instead.
-const CHART_GLIDE = { duration: 380, easing: 'easeOutCubic' };
+const CHART_GLIDE = { duration: 260, easing: 'easeOutCubic' };
 function makeChart(canvas, config) {
   const id = canvas.id || (canvas.id = 'c' + Math.random().toString(36).slice(2));
   const old = charts[id];

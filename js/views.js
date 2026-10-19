@@ -158,6 +158,7 @@ function renderOpenings(sec, games) {
         <tbody>${pairs.map(p => `<tr><td title="${esc(p.name)}">${esc(p.name.length > 44 ? p.name.slice(0, 42) + '…' : p.name)}</td>${side(p.white)}${side(p.black)}</tr>`).join('') || '<tr><td class="muted" colspan="${1 + 2 * cols}">No openings with enough games</td></tr>'}</tbody>
       </table></div>
     </div>
+    ${theoryCard(games)}
     <div class="grid cols-2" style="margin-bottom:14px">
       <div class="card"><h3>${colorDot('white')} As White</h3><div class="sub">vs expected · 5+ games</div><div class="chart-box tall" id="oWhiteBox"><canvas id="oWhite"></canvas></div></div>
       <div class="card"><h3>${colorDot('black')} As Black</h3><div class="sub">vs expected · 5+ games</div><div class="chart-box tall" id="oBlackBox"><canvas id="oBlack"></canvas></div></div>
@@ -254,13 +255,25 @@ function ciRow(label, help, me, opp, chance = null) {
 
 // Style fingerprint card: a title from the clearest traits vs your opponents, the evidence, and the famous
 // players whose (identically measured) fingerprints are closest
+// No style until the games are scanned: the title rests on engine-verified choices (sacrifices, trades, forcing moves)
+function fingerprintPending() {
+  return `<div class="card fingerprint">
+    <div class="sub">Style</div>
+    <div class="fp-title fp-none">Scan your games to find your style</div>
+    <p class="muted fp-desc">It comes from the choices you make when several moves are equally good. 50+ games gives a clear answer.</p>
+  </div>`;
+}
+
 function fingerprintCard(fp, nGames, nScan) {
+  const a = fp.archetype;
   return `<div class="card fingerprint">
     <div class="fp-top">
       <div class="fp-main">
         <div class="sub">Style · ${nGames} games${nScan ? ` · ${nScan} scanned` : ''}</div>
         <div class="fp-title">${esc(fp.title)}</div>
+        ${a ? `<p class="fp-desc">${esc(a.desc)}${a.confident ? '' : ' <span class="muted">Leaning: suggestive, not conclusive. Scan more games to confirm.</span>'}</p>` : ''}
         <div class="fp-traits">${fp.evidence.map(e => `<span class="trait-chip ${e.up ? 'up' : 'down'}">${e.up ? '▲' : '▼'} ${esc(e.label)}</span>`).join('') || '<span class="muted small">Nothing stands out yet.</span>'}</div>
+        ${fp.blend.length ? `<div class="fp-blend muted small">Also fits: ${fp.blend.map(b => `${esc(b.name)} ${b.fit}%`).join(' · ')}</div>` : ''}
       </div>
       <div class="fp-twin" id="fpTwin"></div>
     </div>
@@ -284,8 +297,9 @@ async function fillTwins(fp, el) {
 function renderPlaystyle(sec, games) {
   const hb = computeHabits(games);
   const prof = computeStyleProfile(S.scanAgg);
-  const fp = styleTitle(styleDims({ ...(habitCounts(games) || {}), ...engineCounts(S.scanAgg?.style) }));
-  let html = fingerprintCard(fp, games.length, S.scanAgg?.n)
+  const scanned = !!S.scanAgg?.style;
+  const fp = scanned ? styleTitle(styleDims({ ...(habitCounts(games) || {}), ...engineCounts(S.scanAgg.style) }), styleExtra(S.scanAgg.style)) : null;
+  let html = (scanned ? fingerprintCard(fp, games.length, S.scanAgg.n) : fingerprintPending())
     + '<div class="card" id="shapeCard" style="margin-bottom:14px"></div>'
     + scanControls('Engine scan', 'Adds accuracy, blunders and choices.');
   if (prof) {
@@ -343,7 +357,7 @@ function renderPlaystyle(sec, games) {
     </div>`;
   }
   sec.innerHTML = html;
-  fillTwins(fp, $('#fpTwin', sec));
+  if (fp) fillTwins(fp, $('#fpTwin', sec));
   fillShapeCard($('#shapeCard', sec));
   bindScan(sec, games);
   $$('[data-bm]', sec).forEach(e => e.onclick = () => { const b = S.scanAgg.brilliantMoves[+e.dataset.bm]; openReview(b.game, b.ply + 1); });
@@ -533,12 +547,12 @@ function renderReport(sec, games) {
   const F = computeReport(games, S.scanAgg);
   const s = F.filter(f => f.type === 'strength'), w = F.filter(f => f.type === 'weakness'), n = F.filter(f => f.type === 'note');
   const item = f => `<div class="finding ${f.type}"><div class="icon">${f.type === 'strength' ? '+' : f.type === 'weakness' ? '−' : 'i'}</div><div><b>${esc(f.title)}</b><div class="evidence">${esc(f.evidence)}</div>${f.tip ? `<div class="tip">→ ${esc(f.tip)}</div>` : ''}</div></div>`;
-  const fpTitle = styleTitle(styleDims({ ...(habitCounts(games) || {}), ...engineCounts(S.scanAgg?.style) })).title;
+  const fpTitle = S.scanAgg?.style ? styleTitle(styleDims({ ...(habitCounts(games) || {}), ...engineCounts(S.scanAgg.style) }), styleExtra(S.scanAgg.style)).title : null;
   sec.innerHTML = `
     <div class="card" style="margin-bottom:14px"><div class="row-between"><div>
       <h3>Strengths &amp; weaknesses</h3>
       <div class="sub">${games.length} games${S.scanAgg ? ` · ${S.scanAgg.n} scanned` : ' · <a href="#" id="toScan">scan</a> for more'}</div></div>
-      <div style="text-align:right"><div class="sub" style="margin:0">Style</div><b>${esc(fpTitle)}</b></div></div></div>
+      ${fpTitle ? `<div style="text-align:right"><div class="sub" style="margin:0">Style</div><b>${esc(fpTitle)}</b></div>` : ''}</div></div>
     <div class="grid cols-2">
       <div class="card"><h3>Strengths</h3>${s.map(item).join('') || '<p class="muted">No clear strengths stand out yet — more games will sharpen the picture.</p>'}</div>
       <div class="card"><h3>Weaknesses &amp; what to train</h3>${w.map(item).join('') || '<p class="muted">No significant weaknesses detected.</p>'}</div>

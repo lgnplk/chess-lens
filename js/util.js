@@ -73,6 +73,20 @@ function fmtDate(d) {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+// The opening book mixes two conventions for the en-passant square: listed only when a pawn can actually capture
+// there (standard EPD), or as chess.js writes it, after every double pawn step. bookHit tries both.
+function bookKey(fen) {
+  const p = fen.split(' ');
+  if (p[3] && p[3] !== '-') {
+    const f = p[3].charCodeAt(0) - 97, rank = p[3][1], rows = p[0].split('/');
+    // the capturing pawn stands beside the pushed one: rank 4 (black to move, ep on 3) or rank 5 (white to move, ep on 6)
+    const row = rows[rank === '3' ? 4 : 3].replace(/d/g, n => '.'.repeat(+n)), pawn = p[1] === 'b' ? 'p' : 'P';
+    if (![f - 1, f + 1].some(x => x >= 0 && x < 8 && row[x] === pawn)) p[3] = '-';
+  }
+  return p.slice(0, 4).join(' ');
+}
+// the book entry for a position (a full FEN or its first four fields), whichever convention the book used
+const bookHit = (book, fen) => book.get(fen.split(' ').slice(0, 4).join(' ')) || book.get(bookKey(fen));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const nextFrame = () => new Promise(r => setTimeout(r, 0));
 

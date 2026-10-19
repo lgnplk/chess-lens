@@ -136,7 +136,7 @@ async function labelOpenings(games) {
   for (const g of games) {
     if (g.opening !== undefined) continue;
     let name = null;
-    for (const f of g.fens.slice(1, 25)) { const hit = book.get(f.split(' ').slice(0, 4).join(' ')); if (hit) name = hit; }
+    for (const f of g.fens.slice(1, 25)) { const hit = bookHit(book, f); if (hit) name = hit; }
     g.opening = name ? name.name : '';
     g.family = name ? name.name.split(':')[0] : 'Unknown';
   }

@@ -167,8 +167,8 @@ function refreshH2H() {
   let engineHtml;
   if (st) {
     const ax = engineAxes([st.A.style.me, st.B.style.me]);
-    const ta = styleTitle(styleDims({ ...(habitCounts(A.games) || {}), ...engineCounts(st.A.style) })).title;
-    const tb = styleTitle(styleDims({ ...(habitCounts(B.games) || {}), ...engineCounts(st.B.style) })).title;
+    const ta = styleTitle(styleDims({ ...(habitCounts(A.games) || {}), ...engineCounts(st.A.style) }), styleExtra(st.A.style)).title;
+    const tb = styleTitle(styleDims({ ...(habitCounts(B.games) || {}), ...engineCounts(st.B.style) }), styleExtra(st.B.style)).title;
     const keys = [['Found the only move', 'critical'], ['…hard to see', 'criticalHard'], ['Punished a mistake', 'punish'], ['…hard refutation', 'punishHard'], ['Took a sound sacrifice', 'sacOpp'], ['Sacrifices that held up', 'sacSound'], ['Chose forcing moves', 'forcing'], ['Chose trades', 'trade'], ['Pawn storms', 'storm']];
     const cell = r => r?.n ? `${pct(r.rate)} <span class="muted small">of ${r.n}</span>` : '<span class="muted">–</span>';
     engineHtml = `<div class="grid cols-2">

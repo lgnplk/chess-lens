@@ -38,7 +38,7 @@ function loadSource(src, onStatus) {
     if (src.kind === 'lichess') return loadLichess(src, onStatus);
     if (src.kind === 'otb') return loadOtb(src, onStatus);
     throw new Error('Unknown source');
-  })();
+  })().then(async d => { if (d?.games) await relabelOpenings(d.games); return d; });
   SOURCE_CACHE.set(key, p);
   p.catch(() => SOURCE_CACHE.delete(key));
   return p;

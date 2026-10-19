@@ -714,13 +714,27 @@ table.cmp td.style-name { white-space: normal; font-family: var(--serif); font-s
 .band-pick .band-me { margin-left: auto; }
 
 /* ---------- motion: charts fade in (values then glide on change); tabs ease in ---------- */
-canvas.chart-in { animation: chart-in .35s ease-out; }
+canvas.chart-in { animation: chart-in .16s ease-out; }
 @keyframes chart-in { from { opacity: 0; } }
-.tab:not(.hidden) { animation: tab-in .2s ease-out; }
-@keyframes tab-in { from { opacity: 0; transform: translateY(4px); } }
+.tab:not(.hidden) { animation: tab-in .12s ease-out; }
+@keyframes tab-in { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { canvas.chart-in, .tab:not(.hidden) { animation: none; } }
 
 /* Summary: time control picker */
 .ov-tc { margin-bottom: 12px; }
 .seg .seg-n { font-variant: normal; font-weight: 400; font-size: 12px; color: var(--muted); margin-left: 3px; }
 .seg button.active .seg-n { color: var(--ink-2); }
+
+/* menus: instant response; the underline eases, nothing slides */
+.tabs button, .subtabs button { transition: color .12s ease, background-color .12s ease, border-color .12s ease; }
+
+/* welcome: plainer */
+.welcome h1 { font-size: 46px; line-height: 1.08; font-weight: 600; }
+.welcome h1 em { font-style: normal; }
+.welcome .lede { font-size: 19px; }
+@media (max-width: 880px) { .welcome h1 { font-size: 36px; } }
+
+/* style: archetype card */
+.fp-desc { margin: 4px 0 10px; font-size: 15px; color: var(--ink-2); max-width: 36em; }
+.fp-title.fp-none { font-size: 28px; font-style: italic; }
+.fp-blend { margin-top: 8px; }
