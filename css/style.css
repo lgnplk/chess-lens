@@ -738,3 +738,17 @@ canvas.chart-in { animation: chart-in .16s ease-out; }
 .fp-desc { margin: 4px 0 10px; font-size: 15px; color: var(--ink-2); max-width: 36em; }
 .fp-title.fp-none { font-size: 28px; font-style: italic; }
 .fp-blend { margin-top: 8px; }
+
+/* Shape card: Style and Performance radars, and the bars view */
+.shape-grid { margin-top: 8px; }
+.pane-title { font-family: var(--serif); font-size: 19px; font-weight: 600; }
+.pane-note { text-align: center; margin-top: 4px; }
+.perf-pane.pending .perf-radar, .perf-pane.pending .perf-note { display: none; }
+.shape-bars { padding: 6px 0 2px; }
+.dv-row { display: grid; grid-template-columns: 112px minmax(0, 1fr) 40px; align-items: center; gap: 10px; height: 30px; font-size: 13.5px; }
+.dv-row.faded { opacity: .45; }
+.dv-lab { color: var(--ink-2); }
+.dv-trk { position: relative; height: 8px; background: var(--surface-2); border-radius: 2px; }
+.dv-mid { position: absolute; left: 50%; top: -4px; width: 1px; height: 16px; background: var(--border-strong); }
+.dv-bar { position: absolute; top: 0; height: 8px; border-radius: 2px; transition: width .26s ease-out; }
+.dv-val { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }

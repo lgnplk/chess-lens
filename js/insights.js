@@ -214,6 +214,11 @@ function aggregateScan(results) {
       game, acc: analysis.summary[c].accuracy, oppAcc: analysis.summary[c === 'w' ? 'b' : 'w'].accuracy,
       acpl: analysis.summary[c].acpl, counts: analysis.summary[c].counts,
       maxEval: Math.max(...evs), minEval: Math.min(...evs),
+      // blunders (20+ win-% points lost) per counted move, for both sides, as the ladder counts them
+      ...Object.fromEntries([['my', c], ['opp', c === 'w' ? 'b' : 'w']].flatMap(([who, side]) => {
+        const counted = analysis.moves.filter(m => m.color === side && m.cls !== 'book' && m.cls !== 'forced');
+        return [[who + 'Counted', counted.length], [who + 'Bl', counted.filter(m => m.loss >= 20).length]];
+      })),
     });
   }
   const phaseStats = ['opening', 'middlegame', 'endgame'].map(p => {

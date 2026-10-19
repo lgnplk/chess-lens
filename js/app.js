@@ -56,7 +56,13 @@ function switchTab(tab) {
   $$('.tab').forEach(s => s.classList.toggle('hidden', s.id !== 'tab-' + tab));
   // the menu repaints first; heavy pages then render on the next frame instead of blocking the click
   if (['review', 'bot', 'prepare', 'arena'].includes(tab)) renderTab(tab);
-  else requestAnimationFrame(() => requestAnimationFrame(() => { if (S.tab === tab) renderTab(tab); }));
+  else {
+    // (a timer backs up the frames: a hidden or minimised window gets no animation frames)
+    let done = false;
+    const go = () => { if (done) return; done = true; if (S.tab === tab) renderTab(tab); };
+    requestAnimationFrame(() => requestAnimationFrame(go));
+    setTimeout(go, 60);
+  }
   if (tab === 'review') showReview(); else hideReview();
   if (tab === 'prepare') maybeBotMove(); else hidePrepare();
   if (tab === 'bot') maybeBotThink(); else hideBot();

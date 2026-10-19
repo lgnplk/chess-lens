@@ -174,7 +174,11 @@ function styleTitle(dims, extra = {}) {
     archetype = { id: top.a.id, name: top.a.name, group: top.a.group, desc: top.a.desc, confident: top.confident };
     title = brilliant ? `Brilliant ${top.a.name.replace(/^./, c => c.toLowerCase())}` : top.a.name;
   } else if (measured < 4) title = 'Not enough data yet';
-  else { title = 'All-rounder'; archetype = { id: 'allrounder', name: 'All-rounder', group: '', confident: true, desc: 'No habit stands out from your opponents’: you play like the field.' }; }
+  else {
+    title = 'All-rounder';
+    const desc = sig.length ? 'A few clear habits, but no single archetype fits them.' : 'No habit stands out from your opponents’: you play like the field.';
+    archetype = { id: 'allrounder', name: 'All-rounder', group: '', confident: true, desc };
+  }
   // other archetypes that fit, as a share of the best fit
   const blend = matches.slice(1, 4).map(m => ({ id: m.a.id, name: m.a.name, fit: Math.round(100 * m.score / top.score) })).filter(b => b.fit >= 40);
   const evidence = sig.slice(0, 5).map(d => {

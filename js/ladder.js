@@ -151,27 +151,133 @@ function nearestBand(bands, b) {
 const ladderTable = (leftHead, rightHead, leftCell, rightVals) => `<thead><tr><th></th><th class="num">${leftHead}</th><th class="num">${rightHead}</th></tr></thead><tbody>
   ${LADDER_AXES.map(x => `<tr><td>${ladderRowName(x)}</td><td class="num">${leftCell(x)}</td><td class="num">${rightVals[x.key] != null ? x.cell(rightVals[x.key]) : '–'}</td></tr>`).join('')}</tbody>`;
 
-// ---------- "Your shape": you vs the typical player of a band (in the Style page) ----------
+// ---------- performance: from an engine scan, you vs your opponents in the same games ----------
+// Each axis is drawn on a fixed scale (lo at the centre → hi at the rim) wide enough to span real players; tooltips
+// and the bars view give the raw numbers. Opponents in the same games stand in for "the typical player at your
+// level": matchmaking pairs you with people near your rating, and it cancels out game type.
+const PERF_AXES = [
+  { key: 'accuracy', label: 'Accuracy', lo: 55, hi: 95, fmt: v => num(v, 1) + '% accuracy' },
+  { key: 'blunders', label: 'Few blunders', lo: 12, hi: 0, fmt: v => num(v, 1) + ' blunders per 100 moves' },
+  { key: 'conversion', label: 'Conversion', lo: 0.4, hi: 1, fmt: v => pct(v) + ' scored from winning positions' },
+  { key: 'resilience', label: 'Resilience', lo: 0, hi: 0.6, fmt: v => pct(v) + ' scored from losing positions' },
+  { key: 'brilliance', label: 'Brilliance', lo: 0, hi: 0.7, fmt: v => pct(v) + ' of sound sacrifices and hard refutations found' },
+  { key: 'consistency', label: 'Consistency', lo: 16, hi: 4, fmt: v => '±' + num(v, 1) + ' accuracy from game to game' },
+  { key: 'clutch', label: 'Clutch', lo: 0.2, hi: 0.9, fmt: v => pct(v) + ' of only-move moments found' },
+];
+const perfScale = (a, v) => (v == null ? null : Math.max(0, Math.min(100, 100 * (v - a.lo) / (a.hi - a.lo))));
+
+function computePerformance(agg) {
+  const pg = agg?.perGame;
+  if (!pg?.length || !agg.style) return null;
+  const me = agg.style.me, op = agg.style.opp;
+  const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
+  const win = pg.filter(p => p.maxEval >= 300), lose = pg.filter(p => p.minEval <= -300);
+  const sc = list => mean(list.map(p => scoreOf(p.game)));
+  // pooled rate over several kinds of chance, once there are 10+ chances
+  const pool = (...rs) => { const n = sum(rs.map(r => r?.n || 0)); return n >= 10 ? sum(rs.map(r => r?.k || 0)) / n : null; };
+  const side = (accKey, who) => {
+    const accs = pg.map(p => p[accKey]).filter(x => x != null), counted = sum(pg.map(p => p[who + 'Counted'] || 0));
+    return {
+      accuracy: accs.length >= 5 ? mean(accs) : null,
+      blunders: counted >= 100 ? 100 * sum(pg.map(p => p[who + 'Bl'] || 0)) / counted : null,
+      consistency: accs.length >= 8 ? sd(accs) : null,
+    };
+  };
+  const you = { ...side('acc', 'my'), conversion: win.length >= 5 ? sc(win) : null, resilience: lose.length >= 5 ? sc(lose) : null,
+    brilliance: pool(me.sacOpp, me.punishHard), clutch: me.critical.n >= 10 ? me.critical.rate : null };
+  // your opponents converted the games where you were losing, and held the ones where you were winning
+  const opp = { ...side('oppAcc', 'opp'), conversion: lose.length >= 5 ? 1 - sc(lose) : null, resilience: win.length >= 5 ? 1 - sc(win) : null,
+    brilliance: pool(op.sacOpp, op.punishHard), clutch: op.critical.n >= 10 ? op.critical.rate : null };
+  // how many chances each axis rests on (thin ones are faded in the bars view)
+  const n = { accuracy: pg.length, blunders: pg.length, consistency: pg.length, conversion: Math.min(win.length, lose.length) || win.length,
+    resilience: lose.length, brilliance: (me.sacOpp?.n || 0) + (me.punishHard?.n || 0), clutch: me.critical.n };
+  return { games: pg.length, you, opp, n };
+}
+
+// Option B: bars from a centre line (the reference player). rows: [{ label, diff, tip, faded }]; goodBad colours
+// them green/red (performance) or leaves them neutral (style: different, not better)
+function divergingBars(rows, goodBad) {
+  return rows.map(r => {
+    const w = Math.min(50, Math.abs(r.diff)), up = r.diff >= 0, shown = Math.round(Math.abs(r.diff));
+    const col = goodBad ? (up ? 'var(--good-text)' : 'var(--critical)') : 'var(--brass)';
+    return `<div class="dv-row${r.faded ? ' faded' : ''}" title="${esc(r.tip)}"><span class="dv-lab">${esc(r.label)}</span>
+      <div class="dv-trk"><div class="dv-mid"></div><div class="dv-bar" style="background:${col};${up ? 'left' : 'right'}:50%;width:${w}%"></div></div>
+      <span class="dv-val" style="color:${goodBad ? col : 'inherit'}">${shown ? (up ? '+' : '−') : ''}${shown}</span></div>`;
+  }).join('');
+}
+
+// ---------- "Shape": a Style radar (you vs the typical player of a band) and a Performance radar (you vs your
+// opponents, from the scan), with a bars view of the same numbers ----------
 async function fillShapeCard(el) {
   if (!el) return;
   const L = await getLadder();
   const tcs = L ? LADDER_TCS.filter(tc => L.tc[tc] && Object.keys(L.tc[tc].bands).length && ladderYou(tc)) : [];
-  if (!tcs.length) { el.innerHTML = `<h3>Your shape</h3><p class="muted small">${L ? 'Needs 10+ rated bullet, blitz or rapid games.' : 'Ladder data unavailable.'}</p>`; return; }
+  if (!tcs.length) { el.innerHTML = `<h3>Shape</h3><p class="muted small">${L ? 'Needs 10+ rated bullet, blitz or rapid games.' : 'Ladder data unavailable.'}</p>`; return; }
   const tc = tcs.includes(ladderState.tc) ? ladderState.tc : tcs.reduce((a, b) => (ladderYou(a).games >= ladderYou(b).games ? a : b));
   const T = L.tc[tc], you = ladderYou(tc), bands = Object.keys(T.bands).map(Number).sort((a, b) => a - b);
   const band = bands.includes(ladderState.band) && ladderState.tc === tc ? ladderState.band : nearestBand(bands, you.band);
+  const view = ladderState.view || 'radar';
   Object.assign(ladderState, { tc, band });
   const typ = ladderTypical(T.bands[band]);
-  if (!$('#shapeRadar', el)) el.innerHTML = `<div class="row-between"><h3>Your shape</h3><span class="shape-tcs"></span></div>
-    <div class="sub band-pick shape-pick"></div>
-    <div class="grid cols-2"><div class="chart-box radar"><canvas id="shapeRadar"></canvas></div><table class="cmp ladder-vals shape-vals"></table></div>`;
+  const perf = computePerformance(S.scanAgg);
+  if (!$('#shapeRadar', el)) el.innerHTML = `<div class="row-between"><h3>Shape</h3><span class="shape-view"></span></div>
+    <div class="grid cols-2 shape-grid">
+      <div class="shape-pane">
+        <div class="row-between"><span class="pane-title">Style</span><span class="shape-tcs"></span></div>
+        <div class="sub band-pick shape-pick"></div>
+        <div class="chart-box radar shape-radar"><canvas id="shapeRadar"></canvas></div>
+        <div class="shape-bars style-bars"></div>
+        <div class="muted small pane-note">Differences, not scores</div>
+      </div>
+      <div class="shape-pane perf-pane">
+        <div class="row-between"><span class="pane-title">Performance</span></div>
+        <div class="sub perf-sub"></div>
+        <div class="chart-box radar shape-radar perf-radar"><canvas id="perfRadar"></canvas></div>
+        <div class="shape-bars perf-bars"></div>
+        <div class="muted small pane-note perf-note">Outward is better</div>
+      </div>
+    </div>`;
+  slot(el, 'shape-view').innerHTML = `<div class="seg">${[['radar', 'Radar'], ['bars', 'Bars']].map(([v, l]) => `<button data-shape-view="${v}" class="${v === view ? 'active' : ''}">${l}</button>`).join('')}</div>`;
   slot(el, 'shape-tcs').innerHTML = ladderTcTabs(tcs, tc, 'data-shape-tc');
   slot(el, 'shape-pick').innerHTML = `You vs ${ladderBandSelect('shapeBand', bands, band)}${you.band === band ? ' · your band' : ''}`;
-  slot(el, 'shape-vals').innerHTML = ladderTable('You', 'Typical', a => you.vals[a.key] != null ? a.cell(you.vals[a.key]) : '<span class="muted">scan</span>', typ);
-  radarChart($('#shapeRadar', el), LADDER_AXES.map(a => a.label), [
-    { label: 'You', data: ladderRadar(T, you.vals), slot: '--s1' },
-    { label: `Typical ${bandLabel(band)}`, data: ladderRadar(T, typ), slot: '--s3' },
-  ], { tooltip: c => { const a = LADDER_AXES[c.dataIndex], v = c.datasetIndex ? typ[a.key] : you.vals[a.key]; return `${c.dataset.label}: ${v != null ? a.fmt(v) : '–'}`; } });
+  $$('.shape-radar', el).forEach(x => x.classList.toggle('hidden', view !== 'radar'));
+  $$('.shape-bars', el).forEach(x => x.classList.toggle('hidden', view !== 'bars'));
+
+  // style: the six habit axes, as percentiles among players of this time control
+  const axes = LADDER_AXES.filter(a => !a.engine), keys = new Set(axes.map(a => a.key));
+  const pick = arr => LADDER_AXES.map((a, i) => (keys.has(a.key) ? arr[i] : undefined)).filter(x => x !== undefined);
+  const youP = pick(ladderRadar(T, you.vals)), typP = pick(ladderRadar(T, typ));
+  radarChart($('#shapeRadar', el), axes.map(a => a.label), [
+    { label: 'You', data: youP, slot: '--s1' },
+    { label: `Typical ${bandLabel(band)}`, data: typP, dashed: true },
+  ], { tooltip: c => { const a = axes[c.dataIndex], v = c.datasetIndex ? typ[a.key] : you.vals[a.key]; return `${c.dataset.label}: ${v != null ? a.fmt(v) : '–'}`; } });
+  slot(el, 'style-bars').innerHTML = divergingBars(axes.map((a, i) => ({ label: a.label, diff: (youP[i] ?? 0) - (typP[i] ?? 0),
+    tip: `You ${you.vals[a.key] != null ? a.fmt(you.vals[a.key]) : '–'} · typical ${typ[a.key] != null ? a.fmt(typ[a.key]) : '–'} (percentile points)`, faded: youP[i] == null }))
+    .sort((x, y) => Math.abs(y.diff) - Math.abs(x.diff)), false);
+
+  // performance: needs a scan
+  const pane = slot(el, 'perf-pane');
+  pane.classList.toggle('pending', !perf);
+  if (!perf) {
+    slot(el, 'perf-sub').textContent = 'Scan your games to see this.';
+    slot(el, 'perf-bars').innerHTML = '';
+    return bindShape(el);
+  }
+  slot(el, 'perf-sub').textContent = `You vs your opponents · ${perf.games} scanned games`;
+  const yP = PERF_AXES.map(a => perfScale(a, perf.you[a.key])), oP = PERF_AXES.map(a => perfScale(a, perf.opp[a.key]));
+  radarChart($('#perfRadar', el), PERF_AXES.map(a => a.label), [
+    { label: 'You', data: yP, slot: '--s1' },
+    { label: 'Your opponents', data: oP, dashed: true },
+  ], { tooltip: c => { const a = PERF_AXES[c.dataIndex], v = (c.datasetIndex ? perf.opp : perf.you)[a.key]; return `${c.dataset.label}: ${v != null ? a.fmt(v) : '–'}`; } });
+  slot(el, 'perf-bars').innerHTML = divergingBars(PERF_AXES.filter((a, i) => yP[i] != null && oP[i] != null).map(a => {
+    const i = PERF_AXES.indexOf(a);
+    return { label: a.label, diff: yP[i] - oP[i], tip: `You: ${a.fmt(perf.you[a.key])} · opponents: ${a.fmt(perf.opp[a.key])}`, faded: perf.n[a.key] < 15 };
+  }).sort((x, y) => y.diff - x.diff), true);
+  bindShape(el);
+}
+
+function bindShape(el) {
+  $$('[data-shape-view]', el).forEach(b => b.onclick = () => { ladderState.view = b.dataset.shapeView; fillShapeCard(el); });
   $$('[data-shape-tc]', el).forEach(b => b.onclick = () => { ladderState.tc = b.dataset.shapeTc; ladderState.band = null; fillShapeCard(el); });
   $('#shapeBand', el).onchange = e => { ladderState.band = +e.target.value; fillShapeCard(el); };
 }
