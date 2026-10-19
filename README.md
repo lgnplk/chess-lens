@@ -20,6 +20,14 @@ stronger. Bots keep the browser Stockfish their calibration was fitted with. `de
 official Stockfish build (it's too big for git); `tools/make-site.js` assembles the pages and models into `site/`,
 which the installer bundles. Bump `version` in `desktop/package.json` for each release.
 
+### Releasing an update
+
+The installed app checks this repository's GitHub releases at start-up and offers a restart when a newer one is ready.
+To publish one: bump `version` in `desktop/package.json`, run `npm run release` in `desktop/`, commit and push, then create a
+release tagged `v<version>` with three files from `desktop/release/<version>/`: the installer, its `.blockmap`, and
+`latest.yml`. Upload the installer and block map under the hyphenated names `latest.yml` lists
+(`Chess-Lens-Setup-<version>.exe`): GitHub turns spaces in file names into dots, which breaks the update.
+
 ## Develop in a browser
 
 ```
