@@ -1,0 +1,18 @@
+# dependencies and build output
+node_modules/
+site/
+desktop/dist/
+desktop/release/
+
+# Stockfish (103 MB, over GitHub's file limit): desktop/get-stockfish.js downloads the official build
+desktop/stockfish/stockfish.exe
+
+# local app profiles from one-off jobs (ladder build, tests) and logs
+.ladder-build/
+.test-profile/
+*.log
+
+# old snapshot copy of the site, screenshots, editor/assistant settings
+playground/
+shots/
+.claude/

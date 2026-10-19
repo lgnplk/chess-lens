@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chess Lens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Source+Sans+3:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">♞</span> Chess Lens</div>
+  <form id="loadForm" class="loadform" autocomplete="off">
+    <input id="username" type="text" placeholder="chess.com username" required spellcheck="false">
+    <select id="months" title="How much history to load">
+      <option value="1">Last month</option>
+      <option value="3" selected>Last 3 months</option>
+      <option value="6">Last 6 months</option>
+      <option value="12">Last 12 months</option>
+      <option value="24">Last 2 years</option>
+      <option value="999">All time</option>
+    </select>
+    <button type="submit" class="btn primary">Load<span class="wide-only"> games</span></button>
+  </form>
+  <button id="themeToggle" class="btn ghost icon" title="Toggle light/dark">◐</button>
+</header>
+
+<div id="status" class="status hidden"></div>
+
+<section id="welcome" class="welcome">
+  <div class="hero">
+    <div>
+      <div class="overline">A study companion for chess.com players</div>
+      <h1>Read your games the way <em>the masters</em> read theirs.</h1>
+      <p class="lede">Enter a chess.com username above. Engine review, your style beside the champions', and bots that play like anyone.</p>
+      <div class="hero-cta"><button class="btn primary" id="guestArena">Play the legends</button><span class="muted">No account needed.</span></div>
+      <div class="legend-row" id="heroLegends"></div>
+    </div>
+    <figure class="diagram">
+      <div class="diagram-frame"><div class="board" id="heroBoard"></div></div>
+      <figcaption><b>Morphy – Duke Karl &amp; Count Isouard</b>, Paris 1858.<br>The Opera Game, after 17.Rd8#.</figcaption>
+    </figure>
+  </div>
+  <div class="contents">
+    <div class="contents-title">Contents</div>
+    <div class="feature-grid">
+      <div class="feature"><span class="num">I</span><b>Game review</b><span>Stockfish evaluation, accuracy, verified brilliant moves, live engine lines and a coach for every move.</span></div>
+      <div class="feature"><span class="num">II</span><b>Style fingerprint</b><span>What you do differently from your own opponents, and which world champion plays most like you.</span></div>
+      <div class="feature"><span class="num">III</span><b>Head to head</b><span>Compare yourself with a friend, then prepare against their actual repertoire.</span></div>
+      <div class="feature"><span class="num">IV</span><b>The bot arena</b><span>Bots of you, your friends, Tal, Fischer, Carlsen and more. Matches, tournaments and predictions.</span></div>
+      <div class="feature"><span class="num">V</span><b>Analytics</b><span>Rating trends, tilt, session fatigue, time trouble, opponent strength and memorable games.</span></div>
+      <div class="feature"><span class="num">VI</span><b>Strengths &amp; weaknesses</b><span>An evidence-backed report with what to train next.</span></div>
+    </div>
+  </div>
+</section>
+
+<main id="app" class="hidden">
+  <div class="filters" id="filters">
+    <div class="player-chip" id="playerChip"></div>
+    <label title="Time control">
+      <select id="fTime"><option value="all">All time controls</option><option value="bullet">Bullet</option><option value="blitz">Blitz</option><option value="rapid">Rapid</option><option value="daily">Daily</option></select>
+    </label>
+    <label title="Color">
+      <select id="fColor"><option value="all">Both colors</option><option value="white">White</option><option value="black">Black</option></select>
+    </label>
+    <label title="Rated or casual">
+      <select id="fRated"><option value="all">All games</option><option value="rated">Rated only</option></select>
+    </label>
+    <span class="count" id="fCount"></span>
+  </div>
+
+  <nav class="tabs" id="tabs">
+    <button data-sec="overview" class="active">Overview</button>
+    <button data-sec="games">Games</button>
+    <button data-sec="insights">Insights</button>
+    <button data-sec="rivals">Rivals</button>
+    <button data-sec="bots">Bots</button>
+  </nav>
+  <nav class="subtabs" id="subtabs"></nav>
+
+  <section class="tab" id="tab-overview"></section>
+  <section class="tab hidden" id="tab-games"></section>
+  <section class="tab hidden" id="tab-review">
+    <div class="rv">
+      <div class="rv-board">
+        <div class="player-line" id="topPlayer"></div>
+        <div class="board-wrap">
+          <div class="evalbar" id="evalbar"><div class="evalfill" id="evalfill"></div><span id="evaltext"></span></div>
+          <div class="board" id="board"></div>
+        </div>
+        <div class="player-line" id="bottomPlayer"></div>
+        <div class="controls">
+          <button class="btn" data-nav="start" title="Start (Home)">⏮</button>
+          <button class="btn" data-nav="prev" title="Previous (←)">◀</button>
+          <button class="btn" data-nav="next" title="Next (→)">▶</button>
+          <button class="btn" data-nav="end" title="End (End)">⏭</button>
+          <button class="btn" data-nav="flip" title="Flip board (F)">⇅</button>
+        </div>
+      </div>
+      <div class="rv-panel">
+        <div class="rv-head" id="rvHead"></div>
+        <div class="progress hidden" id="reviewProgress"><div></div></div>
+        <div class="rv-graph"><canvas id="evalChart"></canvas></div>
+        <div class="rv-tabs"><button data-rv="analysis" class="active">Analysis</button><button data-rv="report">Report</button></div>
+        <div class="rv-body" id="rvAnalysis">
+          <div class="coach" id="coach"></div>
+          <div class="lines" id="engineLines"></div>
+          <div class="moves" id="moveList"></div>
+        </div>
+        <div class="rv-body scroll hidden" id="rvReport">
+          <div id="reviewSummary"></div>
+          <div id="keyMoments"></div>
+          <h3 style="margin-top:16px">Settings</h3>
+          <div class="rv-settings">
+            <label>Review depth <select id="reviewDepth"><option value="12">12 (fast)</option><option value="14" selected>14</option><option value="16">16</option><option value="18">18 (slow)</option></select></label>
+            <button class="btn" id="analyzeBtn">Re-analyze</button>
+            <label><input type="checkbox" id="liveToggle"> Live engine lines</label>
+          </div>
+          <details style="margin-top:12px">
+            <summary>Load a PGN</summary>
+            <textarea id="pgnInput" rows="6" placeholder="Paste PGN here"></textarea>
+            <button class="btn" id="pgnLoad">Load PGN</button>
+          </details>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section class="tab hidden" id="tab-openings"></section>
+  <section class="tab hidden" id="tab-playstyle"></section>
+  <section class="tab hidden" id="tab-blunders"></section>
+  <section class="tab hidden" id="tab-ladder"></section>
+  <section class="tab hidden" id="tab-analytics"></section>
+  <section class="tab hidden" id="tab-scan"></section>
+  <section class="tab hidden" id="tab-h2h"></section>
+  <section class="tab hidden" id="tab-prepare"></section>
+  <section class="tab hidden" id="tab-bot"></section>
+  <section class="tab hidden" id="tab-arena"></section>
+  <section class="tab hidden" id="tab-report"></section>
+</main>
+
+<div id="tooltip" class="tooltip hidden"></div>
+
+<script src="js/util.js"></script>
+<script src="js/api.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/board.js"></script>
+<script src="js/analysis.js"></script>
+<script src="js/insights.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/views.js"></script>
+<script src="js/review.js"></script>
+<script src="js/famous.js"></script>
+<script src="js/style.js"></script>
+<script src="js/ladder.js"></script>
+<script src="js/sources.js"></script>
+<script src="js/tree.js"></script>
+<script src="js/prepare.js"></script>
+<script src="js/h2h.js"></script>
+<script src="js/maia.js"></script>
+<script src="js/bot.js"></script>
+<script src="js/fidelity.js"></script>
+<script src="js/twin.js"></script>
+<script src="js/blunders.js"></script>
+<script src="js/botview.js"></script>
+<script src="js/match.js"></script>
+<script src="js/arena.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

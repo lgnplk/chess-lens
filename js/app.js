@@ -1,0 +1,128 @@
+// App wiring: loading, filters, tabs, theme
+const S = { username: null, player: null, games: [], filtered: [], months: 3, tab: 'overview', scanAgg: null };
+
+const RENDERERS = {
+  overview: renderOverview, games: renderGames, openings: renderOpenings, playstyle: renderPlaystyle,
+  analytics: renderAnalytics, blunders: renderBlunders, scan: renderScan, ladder: renderLadder, h2h: renderH2H, prepare: renderPrepare, bot: renderBot, arena: renderArena, report: renderReport,
+};
+
+// Sections (top row) and their pages (second row)
+const SECTIONS = {
+  overview: [['overview', 'Summary'], ['analytics', 'Analytics'], ['report', 'Report']],
+  games: [['games', 'Games'], ['review', 'Review'], ['openings', 'Openings']],
+  insights: [['playstyle', 'Style'], ['blunders', 'Blunders'], ['scan', 'Accuracy'], ['ladder', 'Ladder']],
+  rivals: [['h2h', 'Head to head'], ['prepare', 'Prepare']],
+  bots: [['bot', 'Your bot'], ['arena', 'Arena']],
+};
+const sectionOf = tab => Object.keys(SECTIONS).find(k => SECTIONS[k].some(([t]) => t === tab));
+const lastInSection = {};
+// without a loaded player only these pages work
+const GUEST_TABS = ['arena', 'ladder', 'review'];
+const firstTab = sec => document.body.classList.contains('guest')
+  ? SECTIONS[sec].map(([t]) => t).find(t => GUEST_TABS.includes(t)) : SECTIONS[sec][0][0];
+
+function setStatus(msg, isError = false) {
+  const s = $('#status');
+  if (!msg) { s.classList.add('hidden'); s.innerHTML = ''; return; }
+  s.classList.remove('hidden'); s.classList.toggle('error', isError);
+  if (isError) s.innerHTML = msg; else showStatus(s, msg);
+}
+
+function applyFilters(render = true) {
+  const t = $('#fTime').value, c = $('#fColor').value, r = $('#fRated').value;
+  S.filtered = S.games.filter(g => (t === 'all' || g.timeClass === t) && (c === 'all' || g.color === c) && (r === 'all' || g.rated));
+  $('#fCount').textContent = `${S.filtered.length} of ${S.games.length} games`;
+  if (render) renderTab(S.tab);
+}
+
+function renderTab(tab) {
+  const fn = RENDERERS[tab];
+  if (fn) fn($('#tab-' + tab), S.filtered);
+}
+
+function switchTab(tab) {
+  S.tab = tab;
+  const sec = sectionOf(tab);
+  lastInSection[sec] = tab;
+  $$('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.sec === sec));
+  $('#subtabs').innerHTML = SECTIONS[sec].map(([t, label]) => `<button data-tab="${t}" class="${t === tab ? 'active' : ''}">${label}</button>`).join('');
+  $$('#subtabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+  $$('.tab').forEach(s => s.classList.toggle('hidden', s.id !== 'tab-' + tab));
+  renderTab(tab);
+  if (tab === 'review') showReview(); else hideReview();
+  if (tab === 'prepare') maybeBotMove(); else hidePrepare();
+  if (tab === 'bot') maybeBotThink(); else hideBot();
+}
+
+async function loadUser(username) {
+  username = username.trim().toLowerCase();
+  if (!username) return;
+  const months = +$('#months').value;
+  const btn = $('#loadForm button');
+  btn.disabled = true;
+  try {
+    PLAYER_CACHE.delete(`${username}:${months}`); // an explicit load always fetches fresh games
+    const { player, games } = await loadPlayerData(username, months, setStatus);
+    Object.assign(S, { username, player, games, months, scanAgg: null });
+    store.set('cl:lastUser', username);
+    const p = player.profile;
+    $('#playerChip').innerHTML = `${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ''}<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.username || username)}</a>${p.title ? ` <span class="pill">${esc(p.title)}</span>` : ''}`;
+    $('#welcome').classList.add('hidden');
+    $('#app').classList.remove('hidden');
+    document.body.classList.remove('guest');
+    setStatus('');
+    themeChartDefaults();
+    applyFilters(false);
+    switchTab(S.tab);
+  } catch (e) {
+    console.error(e);
+    setStatus(e.message || String(e), true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function initTheme() {
+  const saved = store.get('cl:theme');
+  if (saved) document.documentElement.dataset.theme = saved;
+  $('#themeToggle').addEventListener('click', () => {
+    const isDark = document.documentElement.dataset.theme === 'dark' ||
+      (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
+    const next = isDark ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    store.set('cl:theme', next);
+    themeChartDefaults();
+    if (S.games.length) renderTab(S.tab);
+    if (review.analysis) drawEvalChart();
+    if (review.game) drawReview();
+  });
+}
+
+// Welcome page: Morphy's Opera Game final position, and a way into the arena without loading anyone
+function initWelcome() {
+  new BoardView($('#heroBoard')).set({ fen: '1n1Rkb1r/p4ppp/4q3/4p1B1/4P3/8/PPP2PPP/2K5 b k - 1 17', orientation: 'white', lastMove: { from: 'd1', to: 'd8' } });
+  $('#heroLegends').innerHTML = '<span class="lr-label">In the arena</span>' + FAMOUS.filter(f => ['morphy', 'tal', 'fischer', 'kasparov', 'carlsen'].includes(f.id))
+    .map(f => `<span title="${esc(f.name)}">${avatarHtml({ name: f.name, hue: f.hue, size: 36, crown: /World Champion/.test(f.era) })}</span>`).join('');
+  $('#guestArena').onclick = () => {
+    document.body.classList.add('guest');
+    $('#welcome').classList.add('hidden');
+    $('#app').classList.remove('hidden');
+    switchTab('arena');
+  };
+}
+
+function init() {
+  initTheme();
+  initWelcome();
+  initReview();
+  themeChartDefaults();
+  $('#loadForm').addEventListener('submit', e => { e.preventDefault(); loadUser($('#username').value); });
+  ['#fTime', '#fColor', '#fRated'].forEach(s => $(s).addEventListener('change', () => { gamesState.page = 0; applyFilters(); }));
+  $$('#tabs button').forEach(b => b.addEventListener('click', () => switchTab(lastInSection[b.dataset.sec] || firstTab(b.dataset.sec))));
+  const last = store.get('cl:lastUser');
+  const qp = new URLSearchParams(location.search).get('user');
+  if (qp || last) $('#username').value = qp || last;
+  if (qp) loadUser(qp);
+}
+
+init();

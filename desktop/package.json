@@ -1,0 +1,51 @@
+{
+  "name": "chess-lens",
+  "productName": "Chess Lens",
+  "version": "0.1.4",
+  "description": "Chess Lens: analysis, playstyle and player bots for chess.com games",
+  "author": "gogangoblin",
+  "license": "AGPL-3.0-or-later",
+  "main": "main.js",
+  "scripts": {
+    "setup": "npm install && node node_modules/electron/install.js && node get-stockfish.js",
+    "start": "node get-stockfish.js && node ../tools/make-site.js && electron .",
+    "dist": "node get-stockfish.js && node ../tools/make-site.js && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.chesslens.app",
+    "productName": "Chess Lens",
+    "directories": {
+      "output": "release/${version}"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "icon.png",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../site",
+        "to": "site"
+      },
+      {
+        "from": "stockfish",
+        "to": "stockfish"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Chess Lens"
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3"
+  }
+}

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maia Eval</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<style>
+  body { padding: 16px; }
+  main { max-width: 1000px; margin: 0 auto; }
+  table { margin-bottom: 8px; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Maia-3 vs Player bot</h1>
+  <p class="muted small">Held-out move prediction on the Player bot's own test positions (every 5th game).
+    Add <code>?user=name&amp;tc=blitz&amp;months=3&amp;games=40&amp;models=5m,23m</code> to run. Prototype — see MAIA.md.</p>
+  <div id="maiaEval"></div>
+  <h2>Encoding check</h2>
+  <p class="muted small">Compares the browser's top moves with the official PyTorch model on reference positions (models/*.test.json).</p>
+  <button class="btn" id="checkBtn">Run check</button>
+  <pre id="checkOut" class="small"></pre>
+</main>
+<script src="js/util.js"></script>
+<script src="js/api.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/tree.js"></script>
+<script src="js/sources.js"></script>
+<script src="js/bot-legacy.js"></script>
+<script src="js/maia.js"></script>
+<script src="js/maia-eval.js"></script>
+<script>
+// Encoding check: same positions through the browser path, compared with the export script's PyTorch output
+async function maiaCheck(size = '5m') {
+  const ref = await (await fetch(`models/maia3-${size}.onnx.test.json`)).json();
+  const maia = new Maia(size);
+  await maia.ready;
+  const preds = await maia.predict(ref.tests.map(t => ({ fens: [t.fen], eloSelf: t.elo, eloOppo: t.elo })));
+  let worst = 0, sameTop = 0;
+  const lines = ref.tests.map((t, i) => {
+    const got = new Map(preds[i].moves.map(m => [m.uci, m.p]));
+    const diff = Math.max(...t.top.map(([u, p]) => Math.abs((got.get(u) ?? 0) - p)));
+    worst = Math.max(worst, diff);
+    if (preds[i].moves[0].uci === t.top[0][0]) sameTop++;
+    return `${t.elo} ${t.fen}\n  torch: ${t.top.map(([u, p]) => `${u} ${p.toFixed(3)}`).join(', ')}\n  web:   ${preds[i].moves.slice(0, 5).map(m => `${m.uci} ${m.p.toFixed(3)}`).join(', ')}`;
+  });
+  maia.terminate();
+  const summary = { size, positions: ref.tests.length, sameTop, worstProbDiff: worst, msPerRun: maia.ms / maia.runs, loadMs: maia.loadMs };
+  document.getElementById('checkOut').textContent = JSON.stringify(summary) + '\n\n' + lines.join('\n');
+  return summary;
+}
+document.getElementById('checkBtn').onclick = () => maiaCheck();
+</script>
+</body>
+</html>
