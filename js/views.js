@@ -22,13 +22,20 @@ function ovTcPicker() {
 }
 const bindOvTc = sec => $$('[data-ov-tc]', sec).forEach(b => b.onclick = () => { const f = $('#fTime'); f.value = b.dataset.ovTc; f.dispatchEvent(new Event('change')); });
 
+// current chess.com ratings, per time control (from the profile, whatever the filters)
+function ratingTiles() {
+  const st = S.player?.stats || {};
+  const ts = ['bullet', 'blitz', 'rapid', 'daily'].filter(k => st['chess_' + k]?.last).map(k => { const r = st['chess_' + k]; return tile(tcTitle(k), r.last.rating, r.best ? `best ${r.best.rating}` : ''); });
+  return ts.length ? `<div class="tiles rating-tiles">${ts.join('')}</div>` : '';
+}
+
 function renderOverview(sec, games) {
   if (!games.length) { sec.innerHTML = ovTcPicker() + empty('No games match these filters.'); bindOvTc(sec); return; }
   const ov = computeOverview(games);
   const a = ov.all;
   const accs = games.map(g => g.ccAccuracy?.me).filter(x => x != null);
   const st = ov.streak;
-  sec.innerHTML = `${ovTcPicker()}
+  sec.innerHTML = `${ovTcPicker()}${ratingTiles()}
     <div class="tiles">
       ${tile('Games', a.n, `${a.w}W · ${a.d}D · ${a.l}L`)}
       ${tile('Score', pct(a.score, 1), `${signed(a.over)} vs rating expectation`)}
@@ -300,8 +307,7 @@ function renderPlaystyle(sec, games) {
   const scanned = !!S.scanAgg?.style;
   const fp = scanned ? styleTitle(styleDims({ ...(habitCounts(games) || {}), ...engineCounts(S.scanAgg.style) }), styleExtra(S.scanAgg.style)) : null;
   let html = (scanned ? fingerprintCard(fp, games.length, S.scanAgg.n) : fingerprintPending())
-    + '<div class="card" id="shapeCard" style="margin-bottom:14px"></div>'
-    + scanControls('Engine scan', 'Adds accuracy, blunders and choices.');
+    + '<div class="card" id="shapeCard" style="margin-bottom:14px"></div>';
   if (prof) {
     const me = prof.me, op = prof.op;
     const legend = '<div class="legend"><span><i class="lg-me"></i>You</span><span><i class="lg-band"></i>90% range</span><span><i class="lg-opp"></i>Opponents</span><span><i class="lg-exp"></i>Random good move</span></div>';
@@ -359,7 +365,6 @@ function renderPlaystyle(sec, games) {
   sec.innerHTML = html;
   if (fp) fillTwins(fp, $('#fpTwin', sec));
   fillShapeCard($('#shapeCard', sec));
-  bindScan(sec, games);
   $$('[data-bm]', sec).forEach(e => e.onclick = () => { const b = S.scanAgg.brilliantMoves[+e.dataset.bm]; openReview(b.game, b.ply + 1); });
 }
 
@@ -436,12 +441,26 @@ function bindTips(root) {
 
 // ---------------- Engine scan ----------------
 const scanState = { running: false, abort: false, n: 100, depth: 12, tc: null }; // tc null: follow the header filter
-function renderScan(sec, games) {
+// Insights: one page — the scan bar, then style and shape, accuracy, blunders, and the ladder by rating
+function renderInsights(sec, games) {
+  if (!$('#insScan', sec)) sec.innerHTML = `<div id="insScan"></div><div id="insStyle"></div>
+    <div class="ins-scanned"><h2 class="h2h-section">Accuracy</h2><div id="insAcc"></div>
+      <h2 class="h2h-section">Blunders</h2><div id="insBl"></div></div>
+    <h2 class="h2h-section">By rating</h2><div id="insLad"></div>`;
+  const guest = !S.games.length, scanned = !!S.scanAgg;
+  $('#insScan', sec).innerHTML = guest ? '' : scanControls('Engine scan', 'Adds accuracy, blunders and performance.');
+  if (!guest) bindScan($('#insScan', sec));
+  $('#insStyle', sec).classList.toggle('hidden', guest);
+  if (!guest) renderPlaystyle($('#insStyle', sec), games);
+  $('.ins-scanned', sec).classList.toggle('hidden', guest || !scanned);
+  if (!guest && scanned) { renderAccuracy($('#insAcc', sec)); renderBlunders($('#insBl', sec), games); }
+  renderByRating($('#insLad', sec));
+}
+
+function renderAccuracy(sec) {
   const agg = S.scanAgg;
-  const ctrls = scanControls('Accuracy', 'Stockfish over your recent games.');
-  if (!agg) { sec.innerHTML = ctrls + empty('No scan yet.'); bindScan(sec, games); return; }
   const t = agg.totals;
-  sec.innerHTML = ctrls + `
+  sec.innerHTML = `
     <div class="tiles">
       ${tile('Games scanned', agg.n, `${agg.nMoves} of your moves`)}
       ${tile('Your accuracy', num(agg.acc, 1) + '%', `opponents ${num(agg.oppAcc, 1)}%`)}
@@ -465,7 +484,6 @@ function renderScan(sec, games) {
         ${agg.worstMoves.map((m, i) => `<tr class="clickable" data-wm="${i}"><td>vs ${esc(m.game.opp.name)} <span class="muted">${fmtDate(m.game.end)}</span></td><td>${Math.floor(m.ply / 2) + 1}${m.color === 'w' ? '.' : '...'} ${m.san}</td><td>${m.bestSan || ''}</td><td class="num">${num(m.loss, 0)}</td></tr>`).join('') || '<tr><td class="muted" colspan="4">No blunders found.</td></tr>'}
         </tbody></table></div></div>
     </div>`;
-  bindScan(sec, games);
   makeChart($('#scPhase'), {
     type: 'bar',
     data: { labels: agg.phaseStats.map(p => p.phase), datasets: [{ label: 'Accuracy', data: agg.phaseStats.map(p => p.acc), backgroundColor: cssVar('--s1'), borderRadius: 2, maxBarThickness: 48 }] },
@@ -538,7 +556,7 @@ async function runScan(list) {
   });
   if (results.length) S.scanAgg = aggregateScan(results);
   scanState.running = false;
-  if (['scan', 'playstyle', 'blunders', 'report'].includes(S.tab)) renderTab(S.tab);
+  if (['insights', 'report'].includes(S.tab)) renderTab(S.tab);
 }
 
 // ---------------- Report ----------------
@@ -558,5 +576,5 @@ function renderReport(sec, games) {
       <div class="card"><h3>Weaknesses &amp; what to train</h3>${w.map(item).join('') || '<p class="muted">No significant weaknesses detected.</p>'}</div>
     </div>
     ${n.length ? `<div class="card" style="margin-top:14px"><h3>Other observations</h3>${n.map(item).join('')}</div>` : ''}`;
-  const ts = $('#toScan', sec); if (ts) ts.onclick = e => { e.preventDefault(); switchTab('scan'); };
+  const ts = $('#toScan', sec); if (ts) ts.onclick = e => { e.preventDefault(); switchTab('insights'); };
 }

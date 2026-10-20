@@ -315,19 +315,18 @@ const bdrill = { mode: 'safety', lists: null, idx: null, score: null, reveal: nu
 function blMoveLabel(m) { return `${Math.floor(m.ply / 2) + 1}${m.color === 'w' ? '.' : '…'}${m.san}`; }
 
 function renderBlunders(sec, games) {
-  const ctrls = scanControls('Blunders', 'Moves that gave away 20+ win-% points.');
   const agg = S.scanAgg;
-  if (!agg?.myMoves) { sec.innerHTML = ctrls + empty('Scan to see them. 50+ games is best.'); bindScan(sec, games); return; }
+  if (!agg?.myMoves) { sec.innerHTML = ''; return; }
   if (S._blAgg !== agg) { S._blAgg = agg; S._bl = blunderAnatomy(agg.myMoves); bdrill.lists = null; bdrill.reveal = null; }
   const A = S._bl;
-  if (!A.list.length) { sec.innerHTML = ctrls + empty(`No blunders in ${agg.n} scanned games. Scan more games for a fuller picture.`); bindScan(sec, games); return; }
+  if (!A.list.length) { sec.innerHTML = empty(`No blunders in ${agg.n} scanned games. Scan more games for a fuller picture.`); return; }
   const rules = blunderRules(A);
   const top = A.families[0];
   const lost = Object.entries(A.lostPieces).sort((a, b) => b[1] - a[1]);
   const fast = A.situations.find(s => s.key === 'fast');
   const diagnosis = `The biggest share of your blunders, ${pct(top.share)}, comes from ${top.label.toLowerCase()}${top.cats[0] ? ` — above all, you ${top.cats[0].label.charAt(0).toLowerCase() + top.cats[0].label.slice(1)}` : ''}.`;
 
-  let html = ctrls + `
+  let html = `
     <div class="card bl-head">
       <div class="sub">${A.list.length} blunders in ${A.nGames} games · ${num(A.perGame, 1)} per game · ${num(A.per100, 1)} per 100 moves</div>
       <div class="bl-diagnosis">${esc(diagnosis)}</div>
@@ -361,7 +360,6 @@ function renderBlunders(sec, games) {
       ${A.list.map((b, i) => [b, i]).sort((x, y) => y[0].m.loss - x[0].m.loss).map(([b, i]) => `<tr class="clickable" data-blg="${i}"><td>vs ${esc(b.m.game.opp.name)} <span class="muted">${fmtDate(b.m.game.end)}</span></td><td><b>${esc(blMoveLabel(b.m))}</b></td><td>${esc(BL_CATS[b.cat].label)}</td><td class="muted">${esc(b.line.join(' '))}</td><td class="num">${num(b.m.loss, 0)}</td><td class="num">${b.spent != null ? num(b.spent, b.spent < 10 ? 1 : 0) + ' s' : '–'}</td></tr>`).join('')}
       </tbody></table></div></div>`;
   sec.innerHTML = html;
-  bindScan(sec, games);
   drawBlTrend(A);
   $$('[data-blg]', sec).forEach(el => el.addEventListener('click', () => { const b = A.list[+el.dataset.blg]; openReview(b.m.game, b.m.ply + 1); }));
   drawBlDrill(A);

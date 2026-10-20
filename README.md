@@ -41,9 +41,9 @@ Mentor doesn't allow browser cross-origin requests; the app's server does the sa
 
 ## Navigation
 
-Five sections, each with its own pages: **Overview** (Summary, Analytics, Report), **Games** (Games, Review,
-Openings), **Insights** (Style, Blunders, Accuracy, Ladder), **Rivals** (Head to head, Prepare) and **Bots** (Your
-bot, Arena). Copy is kept to a minimum.
+Four sections: **Overview** (Summary with current ratings, Analytics, Report), **Games** (Games, Review,
+Openings, Prepare), **Insights** (one page: the engine scan, style and shape, accuracy, blunders, and the ladder by
+rating) and **Bots** (Your bot, Arena). Copy is kept to a minimum.
 
 ## Rating ladder
 
@@ -66,7 +66,9 @@ blitz and rapid, built once by `tools/build-ladder.js` (52,462 players) and ship
 - **Radar scale.** Each axis is a percentile among all chess.com players of that time control: bands are weighted
   by chess.com's published rating distribution (`tools/rating-dist.json`). "Few blunders" and consistency are
   inverted (fewer, smaller swings = outward).
-- **Where it shows.** Insights → *Ladder* (two bands, or *Compare my radar*), Style → *Shape*, Head to head.
+- **Where it shows.** Insights: the Shape radars (you vs a band's typical player, or a chess.com player with your
+  record against them) and By rating. Style axes are percentiles; the Performance radar is on a rating scale (the
+  rating whose typical player matches each value), after pulling small samples toward the typical player of your band.
 
 Rebuild: run the app from source with `CL_SITE=.. CL_PROFILE=../.ladder-build` (that profile also keeps the
 computer awake and the window at full speed), then in DevTools `await loadScript('tools/build-ladder.js');

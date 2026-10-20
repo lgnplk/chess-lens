@@ -66,7 +66,8 @@ function scoreBarChart(canvas, rows, { expected = false, color = cssVar('--s1') 
 }
 
 // Radar ("style shape"): series = [{ label, data, slot, dashed }] on a 0–100 scale
-function radarChart(canvas, labels, series, { tooltip } = {}) {
+// rating: values are ratings (0–RATING_MAX), drawn with labelled rings every 1000
+function radarChart(canvas, labels, series, { tooltip, rating = false } = {}) {
   // a missing value would be drawn at the centre, reading as 0: leave that axis out (tooltips keep the original index)
   const keep = labels.map((_, i) => i).filter(i => series.every(s => s.data[i] != null));
   if (keep.length >= 3 && keep.length < labels.length) {
@@ -92,8 +93,9 @@ function radarChart(canvas, labels, series, { tooltip } = {}) {
         tooltip: { callbacks: { label: c => tooltip ? tooltip(c) : `${c.dataset.label}: ${Math.round(c.parsed.r)}` } },
       },
       // the middle ring is the median player, drawn a touch stronger
-      scales: { r: { min: 0, max: 100, ticks: { display: false, stepSize: 25 },
-        grid: { color: c => (c.tick?.value === 50 ? cssVar('--border-strong') : cssVar('--grid')) },
+      scales: { r: { min: 0, max: rating ? RATING_MAX : 100,
+        ticks: rating ? { stepSize: 500, z: 1, backdropColor: 'transparent', color: cssVar('--muted'), font: { size: 10.5 }, callback: v => (v && v % 1000 === 0 ? v : '') } : { display: false, stepSize: 25 },
+        grid: { color: c => (!rating && c.tick?.value === 50 ? cssVar('--border-strong') : cssVar('--grid')) },
         angleLines: { color: cssVar('--grid') },
         pointLabels: { color: cssVar('--ink'), padding: 6, font: { size: narrow ? 11.5 : 13, weight: 600 } } } },
     },
