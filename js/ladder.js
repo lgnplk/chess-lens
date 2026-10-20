@@ -32,8 +32,6 @@ const LADDER_PERF = [
   ladderAxis('clutch', 'Clutch', v => num(v, 0) + '%', 'of only moves found'),
 ];
 const PERF_KEYS = new Set(LADDER_PERF.map(a => a.key));
-// Head to head: accuracy, blunders and the habits on one radar
-const LADDER_AXES = [...LADDER_PERF.slice(0, 2), ...LADDER_STYLE];
 const ladderRowName = a => (a.row || a.label) + (a.unit ? ` <span class="unit">${a.unit}</span>` : '');
 
 // Habits of one player in one time control (games carry replayFeatures' g.f)
@@ -95,7 +93,7 @@ function ladderPct(q, v) {
 }
 
 // Radar values for a set of raw metrics in a time control
-function ladderRadar(tcData, vals, axes = LADDER_AXES) {
+function ladderRadar(tcData, vals, axes) {
   return axes.map(a => { const p = ladderPct(tcData.quantiles[a.key], vals?.[a.key]); return p == null ? null : a.invert ? 100 - p : p; });
 }
 
@@ -131,24 +129,33 @@ const hasPerf = vals => LADDER_PERF.some(a => vals?.[a.key] != null);
 const slot = (el, cls) => $(`.${cls}`, el);
 const valTip = (a, label, v) => `${label}: ${v != null ? a.fmt(v) : '–'}`;
 
-// Two players on the same scale (Head to head)
+// Two players on the same scale (Head to head): a Style and a Performance radar, percentiles among the time control's players
 async function fillPairShape(el, A, B) {
   if (!el) return;
   const L = await getLadder();
   const tcs = L ? LADDER_TCS.filter(tc => L.tc[tc] && Object.keys(L.tc[tc].quantiles).length && ladderMeasure(A.games, tc) && ladderMeasure(B.games, tc)) : [];
-  if (!tcs.length) { el.innerHTML = '<p class="muted small">Needs 10+ rated games each in one time control.</p>'; return; }
+  if (!tcs.length) { el.innerHTML = '<h3>Shape</h3><p class="muted small">Needs 10+ rated games each in one time control.</p>'; return; }
   const tc = tcs.includes(ladderState.ptc) ? ladderState.ptc : tcs.reduce((x, y) => (ladderMeasure(A.games, x).games + ladderMeasure(B.games, x).games >= ladderMeasure(A.games, y).games + ladderMeasure(B.games, y).games ? x : y));
   ladderState.ptc = tc;
   const T = L.tc[tc], a = ladderMeasure(A.games, tc, A.agg), b = ladderMeasure(B.games, tc, B.agg);
-  const noEngine = a.vals.accuracy == null || b.vals.accuracy == null;
-  if (!$('#pairRadar', el)) el.innerHTML = `<div class="row-between" style="margin-bottom:6px"><span class="sub pair-note" style="margin:0"></span><span class="pair-tcs"></span></div>
-    <div class="chart-box radar"><canvas id="pairRadar"></canvas></div>`;
-  slot(el, 'pair-note').textContent = `Percentile among ${tc} players${noEngine ? ' · analyze both for accuracy and blunders' : ''}`;
+  if (!$('#pairStyle', el)) el.innerHTML = `<div class="row-between"><h3>Shape</h3><span class="pair-tcs"></span></div>
+    <div class="sub pair-note"></div>
+    <div class="grid cols-2 shape-grid">
+      <div><span class="pane-title">Style</span><div class="chart-box radar"><canvas id="pairStyle"></canvas></div></div>
+      <div class="perf-pane"><span class="pane-title">Performance</span><div class="sub perf-sub"></div><div class="chart-box radar perf-radar"><canvas id="pairPerf"></canvas></div></div>
+    </div>`;
+  slot(el, 'pair-note').textContent = `Percentile among ${tc} players`;
   slot(el, 'pair-tcs').innerHTML = ladderTcTabs(tcs, tc, 'data-pair-tc');
-  radarChart($('#pairRadar', el), LADDER_AXES.map(x => x.label), [
-    { label: A.label, data: ladderRadar(T, a.vals), slot: '--s1' },
-    { label: B.label, data: ladderRadar(T, b.vals), slot: '--s2' },
-  ], { tooltip: c => valTip(LADDER_AXES[c.dataIndex], c.dataset.label, (c.datasetIndex ? b : a).vals[LADDER_AXES[c.dataIndex].key]) });
+  const pair = (id, axes) => radarChart($('#' + id, el), axes.map(x => x.label), [
+    { label: A.label, data: ladderRadar(T, a.vals, axes), slot: '--s1' },
+    { label: B.label, data: ladderRadar(T, b.vals, axes), slot: '--s2' },
+  ], { tooltip: c => valTip(axes[c.dataIndex], c.dataset.label, (c.datasetIndex ? b : a).vals[axes[c.dataIndex].key]) });
+  pair('pairStyle', LADDER_STYLE);
+  // performance needs both players' games analysed in this time control
+  const ok = hasPerf(a.vals) && hasPerf(b.vals);
+  slot(el, 'perf-pane').classList.toggle('pending', !ok);
+  slot(el, 'perf-sub').textContent = ok ? '' : A.agg && B.agg ? `Re-run the analysis below for ${tc} games.` : `Analyze both players below (${tc} games).`;
+  if (ok) pair('pairPerf', LADDER_PERF);
   $$('[data-pair-tc]', el).forEach(btn => btn.onclick = () => { ladderState.ptc = btn.dataset.pairTc; fillPairShape(el, A, B); });
 }
 

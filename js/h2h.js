@@ -159,7 +159,7 @@ function refreshH2H() {
   const st = h2h.style?.key === styleKey ? h2h.style : null;
   const run = h2h.styleRun?.running ? h2h.styleRun : null;
   const runCtl = `<div class="prep-opts">
-      <label>Games per player <select id="h2hStyleN">${[10, 25, 50, 100, 200].map(n => `<option ${n === (h2h.styleN || 10) ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      <label>Games per player <select id="h2hStyleN">${[10, 25, 50, 100, 200].map(n => `<option ${n === (h2h.styleN || 25) ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
       <button class="btn ${st ? '' : 'primary'} small-btn" id="h2hStyleGo">${run ? 'Stop' : st ? 'Re-run' : 'Analyze both players'}</button>
     </div>
     <div class="progress ${run ? '' : 'hidden'}" id="h2hStyleProg" style="margin-top:8px"><div style="width:${run ? run.progress * 100 : 0}%"></div></div>
@@ -171,7 +171,7 @@ function refreshH2H() {
     const tb = styleTitle(styleDims({ ...(habitCounts(B.games) || {}), ...engineCounts(st.B.style) }), styleExtra(st.B.style)).title;
     const keys = [['Found the only move', 'critical'], ['…hard to see', 'criticalHard'], ['Punished a mistake', 'punish'], ['…hard refutation', 'punishHard'], ['Took a sound sacrifice', 'sacOpp'], ['Sacrifices that held up', 'sacSound'], ['Chose forcing moves', 'forcing'], ['Chose trades', 'trade'], ['Pawn storms', 'storm']];
     const cell = r => r?.n ? `${pct(r.rate)} <span class="muted small">of ${r.n}</span>` : '<span class="muted">–</span>';
-    engineHtml = `<div class="grid cols-2">
+    engineHtml = `<div>
         <div>${ax.length >= 3 ? `<div class="chart-box radar"><canvas id="h2hEngineRadar"></canvas></div>` : '<p class="muted small">Not enough shared chances to draw the shape yet — analyze more games.</p>'}</div>
         <div class="table-wrap"><table class="cmp"><thead><tr><th></th><th class="num">${esc(A.label)}</th><th class="num">${esc(B.label)}</th></tr></thead><tbody>
           <tr><td>Style</td><td class="num style-name">${esc(ta)}</td><td class="num style-name">${esc(tb)}</td></tr>
@@ -185,12 +185,12 @@ function refreshH2H() {
   }
   const styleHtml = `
     <h2 class="h2h-section">Playstyle</h2>
+    <div class="card" id="h2hShape" style="margin-bottom:14px"></div>
     <div class="grid cols-2" style="margin-bottom:14px">
-      <div class="card"><h3>Shape</h3><div id="h2hShape"></div></div>
       <div class="card"><h3>Habits</h3><div class="sub">Each vs their own opponents</div>
         ${habitRows ? `<table class="cmp"><thead><tr><th></th><th class="num">${esc(A.label)}</th><th class="num">${esc(B.label)}</th></tr></thead><tbody>${habitRows}</tbody></table>` : '<p class="muted small">Needs 5+ games for each player.</p>'}</div>
-    </div>
-    <div class="card" style="margin-bottom:14px"><h3>Engine-verified style</h3>${engineHtml}</div>`;
+      <div class="card"><h3>Engine-verified style</h3>${engineHtml}</div>
+    </div>`;
 
   // --- analytics overlays ---
   const an = [sa.an, sb.an];
@@ -249,7 +249,7 @@ function refreshH2H() {
   $('#h2hStyleN').onchange = e => h2h.styleN = +e.target.value;
   $('#h2hStyleGo').onclick = () => {
     if (h2h.styleRun?.running) { h2h.styleRun.abort = true; return; }
-    runH2HStyle(A, B, h2h.styleN || 10, styleKey);
+    runH2HStyle(A, B, h2h.styleN || 25, styleKey);
   };
 
   const names = [A.label, B.label];
@@ -288,7 +288,10 @@ function clockCurveAll(games) {
 async function runH2HStyle(A, B, n, key) {
   const run = h2h.styleRun = { running: true, abort: false, progress: 0, msg: 'Starting…' };
   refreshH2H();
-  const lists = [A, B].map(w => w.games.filter(g => g.plies >= 10).slice(0, n));
+  // the time control the Shape radars compare (their Performance radar needs games in it), else any
+  const tc = h2h.tc !== 'all' ? null : ladderState.ptc;
+  const pick = (w, any) => w.games.filter(g => g.plies >= 10 && (any || !tc || g.timeClass === tc)).slice(0, n);
+  const lists = [A, B].map(w => (pick(w).length ? pick(w) : pick(w, true)));
   const total = lists[0].length + lists[1].length;
   const results = [[], []];
   let done = 0;
