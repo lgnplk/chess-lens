@@ -1,20 +1,19 @@
-// Rating ladder: what the typical chess.com player looks like in each 100-point band, per time control.
+// Rating ladder: what the typical chess.com player looks like in each 250-point band, per time control.
 // js/ladder.json is built once by tools/build-ladder.js from sampled chess.com players; the same functions
 // below measure those players and you, so the comparison is like for like.
 //
-// Method (see tools/build-ladder.js): both sides of every sampled game; Stockfish 19 (depth 12, 1 line) for
-// accuracy and blunders; a sliding, trend-corrected rating window around each band; game-to-game noise removed,
-// so a band's median (its typical player) and the percentiles describe players' real levels. Radar axes are
-// percentiles among all chess.com players of that time control: bands weighted by chess.com's published rating
-// distribution (tools/rating-dist.json). Website scans use
-// the browser engine (Stockfish 10); their numbers are mapped onto the Stockfish 19 scale (ladder.json calib).
+// Method (see tools/build-ladder.js): both sides of every sampled game; Stockfish 19 (depth 12, top 3 lines, as the
+// desktop app scans) for the performance numbers; a sliding, trend-corrected rating window around each band;
+// game-to-game noise removed, so a band's median (its typical player) and the percentiles describe players' real
+// levels. Radar axes are percentiles among all chess.com players of that time control: bands weighted by chess.com's
+// published rating distribution (tools/rating-dist.json). Browser-engine (Stockfish 10) scans have their accuracy
+// and blunders mapped onto the Stockfish 19 scale (ladder.json calib).
 const LADDER_TCS = ['bullet', 'blitz', 'rapid'];
-const LADDER_BAND = 100, LADDER_MIN_GAMES = 10, LADDER_HABIT_GAMES = 50, LADDER_ENGINE_GAMES = 16, LADDER_DEPTH = 12, LADDER_YOU_GAMES = 100;
+const LADDER_BAND = 250, LADDER_MIN_GAMES = 10, LADDER_YOU_GAMES = 100;
 // cell: the bare number for tables (unit shown once, beside the row name); fmt: number + unit for tooltips
 const ladderAxis = (key, label, cell, unit, extra = {}) => ({ key, label, cell, unit, fmt: v => cell(v) + (unit ? ' ' + unit.replace('/100', 'per 100') : ''), ...extra });
-const LADDER_AXES = [
-  ladderAxis('accuracy', 'Accuracy', v => num(v, 1) + '%', '', { engine: true }),
-  ladderAxis('blunders', 'Few blunders', v => num(v, 1), '/100 moves', { row: 'Blunders', engine: true, invert: true }),
+// habits: how a player plays (different, not better)
+const LADDER_STYLE = [
   ladderAxis('checks', 'Checks', v => num(v, 1), '/100 moves'),
   ladderAxis('captures', 'Captures', v => num(v, 1), '/100 moves'),
   ladderAxis('pawns', 'Pawn moves', v => num(v, 0) + '%', 'of moves'),
@@ -22,6 +21,19 @@ const LADDER_AXES = [
   ladderAxis('earlyQueen', 'Early queen', v => num(v, 0) + '%', 'of games'),
   ladderAxis('timeTrouble', 'Time trouble', v => num(v, 0) + '%', 'of games'),
 ];
+// performance: how well (outward is better), from an engine scan
+const LADDER_PERF = [
+  ladderAxis('accuracy', 'Accuracy', v => num(v, 1) + '%', ''),
+  ladderAxis('blunders', 'Few blunders', v => num(v, 1), '/100 moves', { row: 'Blunders', invert: true }),
+  ladderAxis('conversion', 'Conversion', v => num(v, 0) + '%', 'scored from +3'),
+  ladderAxis('resilience', 'Resilience', v => num(v, 0) + '%', 'scored from −3'),
+  ladderAxis('brilliance', 'Brilliance', v => num(v, 0) + '%', 'sound sacs and hard refutations found'),
+  ladderAxis('consistency', 'Consistency', v => '±' + num(v, 1), 'accuracy, game to game', { row: 'Game-to-game swing', invert: true }),
+  ladderAxis('clutch', 'Clutch', v => num(v, 0) + '%', 'of only moves found'),
+];
+const PERF_KEYS = new Set(LADDER_PERF.map(a => a.key));
+// Head to head: accuracy, blunders and the habits on one radar
+const LADDER_AXES = [...LADDER_PERF.slice(0, 2), ...LADDER_STYLE];
 const ladderRowName = a => (a.row || a.label) + (a.unit ? ` <span class="unit">${a.unit}</span>` : '');
 
 // Habits of one player in one time control (games carry replayFeatures' g.f)
@@ -41,16 +53,29 @@ function ladderHabits(games) {
   };
 }
 
-// Accuracy and blunders per 100 moves from analysed games: [{ game, analysis }] (the player's own moves)
-function ladderEngine(items) {
-  const accs = [], counted = [];
-  for (const { game, analysis } of items) {
-    const c = game.color[0];
-    if (analysis.summary?.[c]?.accuracy != null) accs.push(analysis.summary[c].accuracy);
-    counted.push(...analysis.moves.filter(m => m.color === c && m.cls !== 'book' && m.cls !== 'forced'));
-  }
-  if (!accs.length || counted.length < 20) return null;
-  return { engineGames: accs.length, accuracy: mean(accs), blunders: 100 * counted.filter(m => m.loss >= 20).length / counted.length };
+// Performance from your engine scan in one time control, measured as the ladder measures its players
+// (tools/build-ladder.js engineRow); n: how many games or chances each number rests on
+function ladderPerf(agg, tc) {
+  const pg = (agg?.perGame || []).filter(p => p.game.timeClass === tc && p.acc != null);
+  if (!pg.length) return null;
+  const S1 = f => sum(pg.map(f)), counted = S1(p => p.myCounted || 0);
+  const accs = pg.map(p => p.acc), m = mean(accs);
+  const win = pg.filter(p => p.maxEval >= 300), lose = pg.filter(p => p.minEval <= -300);
+  const score = list => 100 * mean(list.map(p => scoreOf(p.game)));
+  const [ck, cn] = [0, 1].map(i => S1(p => p.myCrit?.[i] || 0)), [bk, bn] = [0, 1].map(i => S1(p => p.myBril?.[i] || 0));
+  const enough = pg.length >= 3 && counted >= 20;
+  return {
+    vals: {
+      accuracy: enough ? ladderCalibrate('accuracy', m) : null,
+      blunders: enough ? ladderCalibrate('blunders', 100 * S1(p => p.myBl || 0) / counted) : null,
+      conversion: win.length >= 5 ? score(win) : null,
+      resilience: lose.length >= 5 ? score(lose) : null,
+      brilliance: bn >= 10 ? 100 * bk / bn : null,
+      consistency: pg.length >= 8 ? Math.sqrt(sum(accs.map(x => (x - m) ** 2)) / (pg.length - 1)) : null,
+      clutch: cn >= 10 ? 100 * ck / cn : null,
+    },
+    n: { accuracy: pg.length, blunders: pg.length, conversion: win.length, resilience: lose.length, brilliance: bn, consistency: pg.length, clutch: cn },
+  };
 }
 
 const ladderBandOf = r => Math.floor(r / LADDER_BAND) * LADDER_BAND;
@@ -70,8 +95,8 @@ function ladderPct(q, v) {
 }
 
 // Radar values for a set of raw metrics in a time control
-function ladderRadar(tcData, vals) {
-  return LADDER_AXES.map(a => { const p = ladderPct(tcData.quantiles[a.key], vals?.[a.key]); return p == null ? null : a.invert ? 100 - p : p; });
+function ladderRadar(tcData, vals, axes = LADDER_AXES) {
+  return axes.map(a => { const p = ladderPct(tcData.quantiles[a.key], vals?.[a.key]); return p == null ? null : a.invert ? 100 - p : p; });
 }
 
 let _ladder = null;
@@ -83,34 +108,28 @@ const ladderCalibrate = (key, v) => {
   return f && v != null ? f[0] + f[1] * v : v;
 };
 
-// The typical player of a band: the median for habits; the mean for engine metrics (only 4 games per player,
-// where a median of few-move blunder counts would sit too low)
-const ladderTypical = band => band && Object.fromEntries(LADDER_AXES.map(a => [a.key, (a.engine && !band.sdGame ? band.mean?.[a.key] : null) ?? band.median[a.key]]));
-const bandLabel = b => `${b}–${+b + LADDER_BAND - 1}`;
+// The typical player of a band: the median of its players' true levels
+const ladderTypical = band => band && { ...band.median };
+const bandLabel = b => (+b === 0 ? `<${LADDER_BAND}` : `${b}–${+b + LADDER_BAND - 1}`); // the lowest band: chess.com ratings start at 100
 const tcTitle = tc => tc[0].toUpperCase() + tc.slice(1);
 
-// ---------- you: the same metrics, from your loaded games (and your engine scan for the engine axes) ----------
+// ---------- you: the same metrics, from your loaded games (and your engine scan for performance) ----------
 function ladderMeasure(games, tc, agg = null) {
   const gs = games.filter(g => g.timeClass === tc && g.rated);
   if (gs.length < LADDER_MIN_GAMES) return null;
   // the ladder holds players' true levels (noise removed), so you get your most precise estimate: up to 100 recent games
   const recent = gs.slice(0, LADDER_YOU_GAMES);
-  const vals = { ...(ladderHabits(recent) || {}) };
-  if (agg?.myMoves) {
-    const pg = agg.perGame.filter(p => p.game.timeClass === tc && p.acc != null);
-    const ms = agg.myMoves.filter(m => m.game.timeClass === tc && m.cls !== 'book' && m.cls !== 'forced');
-    if (pg.length >= 3 && ms.length >= 20) {
-      vals.accuracy = ladderCalibrate('accuracy', mean(pg.map(p => p.acc)));
-      vals.blunders = ladderCalibrate('blunders', 100 * ms.filter(m => m.loss >= 20).length / ms.length);
-    }
-  }
-  return { vals, games: gs.length, band: ladderBandOf(median(recent.map(g => g.me.rating))) };
+  const perf = ladderPerf(agg, tc);
+  const vals = { ...(ladderHabits(recent) || {}), ...(perf?.vals || {}) };
+  return { vals, n: perf?.n || {}, games: gs.length, band: ladderBandOf(median(recent.map(g => g.me.rating))) };
 }
 const ladderYou = tc => ladderMeasure(S.games, tc, S.scanAgg);
+const hasPerf = vals => LADDER_PERF.some(a => vals?.[a.key] != null);
 
-// The three radar cards below build their layout once and afterwards only change its contents, so picking a band
+// The radar cards below build their layout once and afterwards only change its contents, so picking a band
 // or a time control glides the radar to its new shape instead of rebuilding every chart on the card.
 const slot = (el, cls) => $(`.${cls}`, el);
+const valTip = (a, label, v) => `${label}: ${v != null ? a.fmt(v) : '–'}`;
 
 // Two players on the same scale (Head to head)
 async function fillPairShape(el, A, B) {
@@ -129,7 +148,7 @@ async function fillPairShape(el, A, B) {
   radarChart($('#pairRadar', el), LADDER_AXES.map(x => x.label), [
     { label: A.label, data: ladderRadar(T, a.vals), slot: '--s1' },
     { label: B.label, data: ladderRadar(T, b.vals), slot: '--s2' },
-  ], { tooltip: c => { const x = LADDER_AXES[c.dataIndex], v = (c.datasetIndex ? b : a).vals[x.key]; return `${c.dataset.label}: ${v != null ? x.fmt(v) : '–'}`; } });
+  ], { tooltip: c => valTip(LADDER_AXES[c.dataIndex], c.dataset.label, (c.datasetIndex ? b : a).vals[LADDER_AXES[c.dataIndex].key]) });
   $$('[data-pair-tc]', el).forEach(btn => btn.onclick = () => { ladderState.ptc = btn.dataset.pairTc; fillPairShape(el, A, B); });
 }
 
@@ -148,53 +167,10 @@ function nearestBand(bands, b) {
 }
 
 // the comparison table under a radar: rows of metrics, a left and a right column
-const ladderTable = (leftHead, rightHead, leftCell, rightVals) => `<thead><tr><th></th><th class="num">${leftHead}</th><th class="num">${rightHead}</th></tr></thead><tbody>
-  ${LADDER_AXES.map(x => `<tr><td>${ladderRowName(x)}</td><td class="num">${leftCell(x)}</td><td class="num">${rightVals[x.key] != null ? x.cell(rightVals[x.key]) : '–'}</td></tr>`).join('')}</tbody>`;
+const ladderTable = (axes, leftHead, rightHead, leftCell, rightVals) => `<thead><tr><th></th><th class="num">${leftHead}</th><th class="num">${rightHead}</th></tr></thead><tbody>
+  ${axes.map(x => `<tr><td>${ladderRowName(x)}</td><td class="num">${leftCell(x)}</td><td class="num">${rightVals[x.key] != null ? x.cell(rightVals[x.key]) : '–'}</td></tr>`).join('')}</tbody>`;
 
-// ---------- performance: from an engine scan, you vs your opponents in the same games ----------
-// Each axis is drawn on a fixed scale (lo at the centre → hi at the rim) wide enough to span real players; tooltips
-// and the bars view give the raw numbers. Opponents in the same games stand in for "the typical player at your
-// level": matchmaking pairs you with people near your rating, and it cancels out game type.
-const PERF_AXES = [
-  { key: 'accuracy', label: 'Accuracy', lo: 55, hi: 95, fmt: v => num(v, 1) + '% accuracy' },
-  { key: 'blunders', label: 'Few blunders', lo: 12, hi: 0, fmt: v => num(v, 1) + ' blunders per 100 moves' },
-  { key: 'conversion', label: 'Conversion', lo: 0.4, hi: 1, fmt: v => pct(v) + ' scored from winning positions' },
-  { key: 'resilience', label: 'Resilience', lo: 0, hi: 0.6, fmt: v => pct(v) + ' scored from losing positions' },
-  { key: 'brilliance', label: 'Brilliance', lo: 0, hi: 0.7, fmt: v => pct(v) + ' of sound sacrifices and hard refutations found' },
-  { key: 'consistency', label: 'Consistency', lo: 16, hi: 4, fmt: v => '±' + num(v, 1) + ' accuracy from game to game' },
-  { key: 'clutch', label: 'Clutch', lo: 0.2, hi: 0.9, fmt: v => pct(v) + ' of only-move moments found' },
-];
-const perfScale = (a, v) => (v == null ? null : Math.max(0, Math.min(100, 100 * (v - a.lo) / (a.hi - a.lo))));
-
-function computePerformance(agg) {
-  const pg = agg?.perGame;
-  if (!pg?.length || !agg.style) return null;
-  const me = agg.style.me, op = agg.style.opp;
-  const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
-  const win = pg.filter(p => p.maxEval >= 300), lose = pg.filter(p => p.minEval <= -300);
-  const sc = list => mean(list.map(p => scoreOf(p.game)));
-  // pooled rate over several kinds of chance, once there are 10+ chances
-  const pool = (...rs) => { const n = sum(rs.map(r => r?.n || 0)); return n >= 10 ? sum(rs.map(r => r?.k || 0)) / n : null; };
-  const side = (accKey, who) => {
-    const accs = pg.map(p => p[accKey]).filter(x => x != null), counted = sum(pg.map(p => p[who + 'Counted'] || 0));
-    return {
-      accuracy: accs.length >= 5 ? mean(accs) : null,
-      blunders: counted >= 100 ? 100 * sum(pg.map(p => p[who + 'Bl'] || 0)) / counted : null,
-      consistency: accs.length >= 8 ? sd(accs) : null,
-    };
-  };
-  const you = { ...side('acc', 'my'), conversion: win.length >= 5 ? sc(win) : null, resilience: lose.length >= 5 ? sc(lose) : null,
-    brilliance: pool(me.sacOpp, me.punishHard), clutch: me.critical.n >= 10 ? me.critical.rate : null };
-  // your opponents converted the games where you were losing, and held the ones where you were winning
-  const opp = { ...side('oppAcc', 'opp'), conversion: lose.length >= 5 ? 1 - sc(lose) : null, resilience: win.length >= 5 ? 1 - sc(win) : null,
-    brilliance: pool(op.sacOpp, op.punishHard), clutch: op.critical.n >= 10 ? op.critical.rate : null };
-  // how many chances each axis rests on (thin ones are faded in the bars view)
-  const n = { accuracy: pg.length, blunders: pg.length, consistency: pg.length, conversion: Math.min(win.length, lose.length) || win.length,
-    resilience: lose.length, brilliance: (me.sacOpp?.n || 0) + (me.punishHard?.n || 0), clutch: me.critical.n };
-  return { games: pg.length, you, opp, n };
-}
-
-// Option B: bars from a centre line (the reference player). rows: [{ label, diff, tip, faded }]; goodBad colours
+// Bars from a centre line (the reference player). rows: [{ label, diff, tip, faded }]; goodBad colours
 // them green/red (performance) or leaves them neutral (style: different, not better)
 function divergingBars(rows, goodBad) {
   return rows.map(r => {
@@ -206,8 +182,20 @@ function divergingBars(rows, goodBad) {
   }).join('');
 }
 
-// ---------- "Shape": a Style radar (you vs the typical player of a band) and a Performance radar (you vs your
-// opponents, from the scan), with a bars view of the same numbers ----------
+// one radar (or its bars) of you against the typical player of a band, in percentile points
+function shapePane(el, canvasId, barsCls, T, axes, you, typ, band, goodBad) {
+  const yP = ladderRadar(T, you.vals, axes), tP = ladderRadar(T, typ, axes), typLabel = `Typical ${bandLabel(band)}`;
+  radarChart($('#' + canvasId, el), axes.map(a => a.label), [
+    { label: 'You', data: yP, slot: '--s1' },
+    { label: typLabel, data: tP, dashed: true },
+  ], { tooltip: c => { const a = axes[c.dataIndex]; return valTip(a, c.dataset.label, (c.datasetIndex ? typ : you.vals)[a.key]); } });
+  const rows = axes.map((a, i) => ({ a, i })).filter(({ i }) => yP[i] != null && tP[i] != null).map(({ a, i }) => ({ label: a.label, diff: yP[i] - tP[i],
+    tip: `You ${a.fmt(you.vals[a.key])} · typical ${a.fmt(typ[a.key])} (percentile points)`, faded: PERF_KEYS.has(a.key) && (you.n[a.key] ?? 99) < 15 }));
+  slot(el, barsCls).innerHTML = divergingBars(goodBad ? rows.sort((x, y) => y.diff - x.diff) : rows.sort((x, y) => Math.abs(y.diff) - Math.abs(x.diff)), goodBad);
+}
+
+// ---------- "Shape": you vs the typical player of a band, as a Style radar (habits) and a Performance radar
+// (from the scan), with a bars view of the same numbers ----------
 async function fillShapeCard(el) {
   if (!el) return;
   const L = await getLadder();
@@ -219,18 +207,17 @@ async function fillShapeCard(el) {
   const view = ladderState.view || 'radar';
   Object.assign(ladderState, { tc, band });
   const typ = ladderTypical(T.bands[band]);
-  const perf = computePerformance(S.scanAgg);
   if (!$('#shapeRadar', el)) el.innerHTML = `<div class="row-between"><h3>Shape</h3><span class="shape-view"></span></div>
+    <div class="row-between shape-head"><div class="sub band-pick shape-pick"></div><span class="shape-tcs"></span></div>
     <div class="grid cols-2 shape-grid">
       <div class="shape-pane">
-        <div class="row-between"><span class="pane-title">Style</span><span class="shape-tcs"></span></div>
-        <div class="sub band-pick shape-pick"></div>
+        <span class="pane-title">Style</span>
         <div class="chart-box radar shape-radar"><canvas id="shapeRadar"></canvas></div>
         <div class="shape-bars style-bars"></div>
         <div class="muted small pane-note">Differences, not scores</div>
       </div>
       <div class="shape-pane perf-pane">
-        <div class="row-between"><span class="pane-title">Performance</span></div>
+        <span class="pane-title">Performance</span>
         <div class="sub perf-sub"></div>
         <div class="chart-box radar shape-radar perf-radar"><canvas id="perfRadar"></canvas></div>
         <div class="shape-bars perf-bars"></div>
@@ -242,41 +229,18 @@ async function fillShapeCard(el) {
   slot(el, 'shape-pick').innerHTML = `You vs ${ladderBandSelect('shapeBand', bands, band)}${you.band === band ? ' · your band' : ''}`;
   $$('.shape-radar', el).forEach(x => x.classList.toggle('hidden', view !== 'radar'));
   $$('.shape-bars', el).forEach(x => x.classList.toggle('hidden', view !== 'bars'));
+  shapePane(el, 'shapeRadar', 'style-bars', T, LADDER_STYLE, you, typ, band, false);
 
-  // style: the six habit axes, as percentiles among players of this time control
-  const axes = LADDER_AXES.filter(a => !a.engine), keys = new Set(axes.map(a => a.key));
-  const pick = arr => LADDER_AXES.map((a, i) => (keys.has(a.key) ? arr[i] : undefined)).filter(x => x !== undefined);
-  const youP = pick(ladderRadar(T, you.vals)), typP = pick(ladderRadar(T, typ));
-  radarChart($('#shapeRadar', el), axes.map(a => a.label), [
-    { label: 'You', data: youP, slot: '--s1' },
-    { label: `Typical ${bandLabel(band)}`, data: typP, dashed: true },
-  ], { tooltip: c => { const a = axes[c.dataIndex], v = c.datasetIndex ? typ[a.key] : you.vals[a.key]; return `${c.dataset.label}: ${v != null ? a.fmt(v) : '–'}`; } });
-  slot(el, 'style-bars').innerHTML = divergingBars(axes.map((a, i) => ({ label: a.label, diff: (youP[i] ?? 0) - (typP[i] ?? 0),
-    tip: `You ${you.vals[a.key] != null ? a.fmt(you.vals[a.key]) : '–'} · typical ${typ[a.key] != null ? a.fmt(typ[a.key]) : '–'} (percentile points)`, faded: youP[i] == null }))
-    .sort((x, y) => Math.abs(y.diff) - Math.abs(x.diff)), false);
-
-  // performance: needs a scan
-  const pane = slot(el, 'perf-pane');
-  pane.classList.toggle('pending', !perf);
-  if (!perf) {
-    slot(el, 'perf-sub').textContent = 'Scan your games to see this.';
+  // performance: needs a scan with games in this time control
+  const ok = hasPerf(you.vals);
+  slot(el, 'perf-pane').classList.toggle('pending', !ok);
+  if (!ok) {
+    slot(el, 'perf-sub').textContent = S.scanAgg ? `Scan some ${tc} games to see this.` : 'Scan your games to see this.';
     slot(el, 'perf-bars').innerHTML = '';
-    return bindShape(el);
+  } else {
+    slot(el, 'perf-sub').textContent = '';
+    shapePane(el, 'perfRadar', 'perf-bars', T, LADDER_PERF, you, typ, band, true);
   }
-  slot(el, 'perf-sub').textContent = `You vs your opponents · ${perf.games} scanned games`;
-  const yP = PERF_AXES.map(a => perfScale(a, perf.you[a.key])), oP = PERF_AXES.map(a => perfScale(a, perf.opp[a.key]));
-  radarChart($('#perfRadar', el), PERF_AXES.map(a => a.label), [
-    { label: 'You', data: yP, slot: '--s1' },
-    { label: 'Your opponents', data: oP, dashed: true },
-  ], { tooltip: c => { const a = PERF_AXES[c.dataIndex], v = (c.datasetIndex ? perf.opp : perf.you)[a.key]; return `${c.dataset.label}: ${v != null ? a.fmt(v) : '–'}`; } });
-  slot(el, 'perf-bars').innerHTML = divergingBars(PERF_AXES.filter((a, i) => yP[i] != null && oP[i] != null).map(a => {
-    const i = PERF_AXES.indexOf(a);
-    return { label: a.label, diff: yP[i] - oP[i], tip: `You: ${a.fmt(perf.you[a.key])} · opponents: ${a.fmt(perf.opp[a.key])}`, faded: perf.n[a.key] < 15 };
-  }).sort((x, y) => y.diff - x.diff), true);
-  bindShape(el);
-}
-
-function bindShape(el) {
   $$('[data-shape-view]', el).forEach(b => b.onclick = () => { ladderState.view = b.dataset.shapeView; fillShapeCard(el); });
   $$('[data-shape-tc]', el).forEach(b => b.onclick = () => { ladderState.tc = b.dataset.shapeTc; ladderState.band = null; fillShapeCard(el); });
   $('#shapeBand', el).onchange = e => { ladderState.band = +e.target.value; fillShapeCard(el); };
@@ -293,12 +257,14 @@ async function renderLadder(sec) {
   // "Compare my radar": you (latest games in this time control) against the typical player of a chosen band
   const me = !!(ladderState.me && you);
   const a = bands.includes(ladderState.a) ? ladderState.a : nearestBand(bands, you?.band ?? 1000);
-  const b = bands.includes(ladderState.b) ? ladderState.b : nearestBand(bands, me ? you.band : a + 500);
-  const trendKey = `${tc}|${you ? [you.band, you.vals.accuracy, you.vals.blunders].join() : ""}`;
-  const tcChanged = ladderState.trendKey !== trendKey;
+  const b = bands.includes(ladderState.b) ? ladderState.b : nearestBand(bands, me ? you.band : a + 1000);
+  const metric = [...LADDER_PERF, ...LADDER_STYLE].find(x => x.key === ladderState.trend) || LADDER_PERF[0];
+  const trendKey = `${tc}|${metric.key}|${you ? [you.band, you.vals[metric.key]].join() : ''}`;
+  const trendChanged = ladderState.trendKey !== trendKey;
   Object.assign(ladderState, { ltc: tc, a, b, trendKey });
   const ta = ladderTypical(T.bands[a]), tb = ladderTypical(T.bands[b]);
   const left = me ? { label: 'You', vals: you.vals } : { label: bandLabel(a), vals: ta };
+  const right = me ? `Typical ${bandLabel(b)}` : bandLabel(b);
   const meBtn = !S.games.length ? '' : you
     ? `<button class="btn small-btn ${me ? '' : 'primary'}" id="ladMe">${me ? 'Compare two bands' : 'Compare my radar'}</button>`
     : `<button class="btn small-btn" disabled title="Needs 10+ rated ${tc} games">Compare my radar</button>`;
@@ -308,38 +274,53 @@ async function renderLadder(sec) {
       <div class="row-between"><h3>Rating ladder</h3><span class="lad-tcs"></span></div>
       <div class="sub band-pick lad-pick"></div>
       <div class="lad-hint"></div>
-      <div class="grid cols-2">
-        <div class="chart-box radar"><canvas id="ladRadar"></canvas></div>
-        <table class="cmp ladder-vals lad-vals"></table>
+      <div class="grid cols-2 shape-grid">
+        <div><span class="pane-title">Style</span><div class="chart-box radar"><canvas id="ladRadar"></canvas></div><table class="cmp ladder-vals lad-vals-s"></table></div>
+        <div><span class="pane-title">Performance</span><div class="chart-box radar"><canvas id="ladPerf"></canvas></div><table class="cmp ladder-vals lad-vals-p"></table></div>
       </div>
     </div>
-    <div class="grid cols-2">
-      <div class="card"><h3>Accuracy</h3><div class="chart-box"><canvas id="ladAcc"></canvas></div></div>
-      <div class="card"><h3>Blunders per 100 moves</h3><div class="chart-box"><canvas id="ladBl"></canvas></div></div>
+    <div class="card">
+      <div class="row-between"><h3>By rating</h3><select id="ladTrend"></select></div>
+      <div class="sub lad-trend-sub"></div>
+      <div class="chart-box"><canvas id="ladTrendChart"></canvas></div>
     </div>
     <p class="muted small lad-foot" style="margin-top:10px"></p>`;
   slot(sec, 'lad-tcs').innerHTML = ladderTcTabs(tcs, tc, 'data-ladder-tc');
   slot(sec, 'lad-pick').innerHTML = `${me ? '<b>You</b>' : ladderBandSelect('ladA', bands, a)} vs ${ladderBandSelect('ladB', bands, b)}${me && you.band === b ? ' · your band' : ''}<span class="band-me">${meBtn}</span>`;
-  slot(sec, 'lad-hint').innerHTML = me && you.vals.accuracy == null ? '<div class="muted small" style="margin:-4px 0 6px">Scan your games (Insights → Accuracy) to add accuracy and blunders.</div>' : '';
-  slot(sec, 'lad-vals').innerHTML = ladderTable(left.label, bandLabel(b), x => left.vals[x.key] != null ? x.cell(left.vals[x.key]) : me && x.engine ? '<span class="muted">scan</span>' : '–', tb);
-  slot(sec, 'lad-foot').textContent = `${T.players} ${tc} players sampled, about ${Math.round(median(bands.map(x => T.bands[x].n)))} per band. Built ${L.built}.`;
-  radarChart($('#ladRadar', sec), LADDER_AXES.map(x => x.label), [
-    { label: left.label, data: ladderRadar(T, left.vals), slot: '--s1' },
-    { label: me ? `Typical ${bandLabel(b)}` : bandLabel(b), data: ladderRadar(T, tb), slot: '--s3' },
-  ], { tooltip: c => { const x = LADDER_AXES[c.dataIndex], v = (c.datasetIndex ? tb : left.vals)[x.key]; return `${c.dataset.label}: ${v != null ? x.fmt(v) : '–'}`; } });
-  // the trend charts only depend on the time control (and you): leave them alone when just a band changes
-  if (fresh || tcChanged) {
-    const line = (id, key, fmtY) => {
-      const pts = bands.map(x => ({ x, y: ladderTypical(T.bands[x])[key] })).filter(p => p.y != null);
-      const ds = [{ label: 'Typical player', data: pts, borderColor: cssVar('--s1'), backgroundColor: cssVar('--s1'), pointRadius: 2.5, tension: 0.25 }];
-      if (you?.vals[key] != null) ds.push({ label: 'You', data: [{ x: you.band + LADDER_BAND / 2, y: you.vals[key] }], borderColor: cssVar('--s2'), backgroundColor: cssVar('--s2'), pointRadius: 6, showLine: false });
-      makeChart($(id, sec), { type: 'line', data: { datasets: ds }, options: {
-        parsing: false, plugins: { legend: { display: !!you, position: 'top', align: 'start' }, tooltip: { callbacks: { title: c => bandLabel(c[0].raw.x - (c[0].raw.x % LADDER_BAND)), label: c => `${c.dataset.label}: ${fmtY(c.parsed.y)}` } } },
-        scales: baseScales({ ticks: { callback: fmtY } }, { type: 'linear', ticks: { callback: v => v } }),
-      } });
-    };
-    line('#ladAcc', 'accuracy', v => num(v, 0) + '%');
-    line('#ladBl', 'blunders', v => num(v, 1));
+  slot(sec, 'lad-hint').innerHTML = me && !hasPerf(you.vals) ? '<div class="muted small" style="margin:-4px 0 6px">Scan your games (Insights → Accuracy) to add performance.</div>' : '';
+  const leftCell = x => left.vals[x.key] != null ? x.cell(left.vals[x.key]) : me && PERF_KEYS.has(x.key) ? '<span class="muted">scan</span>' : '–';
+  slot(sec, 'lad-vals-s').innerHTML = ladderTable(LADDER_STYLE, left.label, right, leftCell, tb);
+  slot(sec, 'lad-vals-p').innerHTML = ladderTable(LADDER_PERF, left.label, right, leftCell, tb);
+  slot(sec, 'lad-foot').textContent = `${T.players.toLocaleString()} ${tc} players sampled, about ${Math.round(median(bands.map(x => T.bands[x].n))).toLocaleString()} per band. Radars: percentile among all ${tc} players. Built ${L.built}.`;
+  for (const [id, axes] of [['#ladRadar', LADDER_STYLE], ['#ladPerf', LADDER_PERF]]) {
+    radarChart($(id, sec), axes.map(x => x.label), [
+      { label: left.label, data: ladderRadar(T, left.vals, axes), slot: '--s1' },
+      { label: right, data: ladderRadar(T, tb, axes), slot: '--s3' },
+    ], { tooltip: c => { const x = axes[c.dataIndex]; return valTip(x, c.dataset.label, (c.datasetIndex ? tb : left.vals)[x.key]); } });
+  }
+  // the trend chart only depends on the time control, the metric (and you): left alone when just a band changes
+  if (fresh || trendChanged) {
+    $('#ladTrend', sec).innerHTML = [['Performance', LADDER_PERF], ['Style', LADDER_STYLE]].map(([g, axes]) =>
+      `<optgroup label="${g}">${axes.map(x => `<option value="${x.key}" ${x.key === metric.key ? 'selected' : ''}>${x.row || x.label}</option>`).join('')}</optgroup>`).join('');
+    slot(sec, 'lad-trend-sub').innerHTML = `Typical player, with the middle half of players shaded${metric.unit ? ` · ${metric.unit.replace('/100', 'per 100')}` : ''}`;
+    const xs = bands.filter(x => T.bands[x].median[metric.key] != null);
+    const pt = (x, k) => ({ x: T.bands[x].centre ?? x + LADDER_BAND / 2, y: T.bands[x][k][metric.key], lo: T.bands[x].p25[metric.key], hi: T.bands[x].p75[metric.key] });
+    const col = cssVar('--s1');
+    const ds = [
+      { label: 'Middle half', data: xs.map(x => pt(x, 'p75')), borderWidth: 0, pointRadius: 0, backgroundColor: col + '22', fill: '+1', tension: 0.25 },
+      { label: '', data: xs.map(x => pt(x, 'p25')), borderWidth: 0, pointRadius: 0, fill: false, tension: 0.25 },
+      { label: 'Typical player', data: xs.map(x => pt(x, 'median')), borderColor: col, backgroundColor: col, pointRadius: 2.5, tension: 0.25 },
+    ];
+    const yv = you?.vals[metric.key];
+    if (yv != null) ds.push({ label: 'You', data: [{ x: median(S.games.filter(g => g.timeClass === tc && g.rated).slice(0, LADDER_YOU_GAMES).map(g => g.me.rating)), y: yv }], borderColor: cssVar('--s2'), backgroundColor: cssVar('--s2'), pointRadius: 6, showLine: false });
+    const fmtY = v => metric.cell(v);
+    makeChart($('#ladTrendChart', sec), { type: 'line', data: { datasets: ds }, options: {
+      parsing: false,
+      plugins: { legend: { display: true, position: 'top', align: 'start', labels: { filter: i => i.text } },
+        tooltip: { filter: i => i.datasetIndex >= 2, callbacks: { title: c => (c[0].datasetIndex === 3 ? 'You' : bandLabel(ladderBandOf(c[0].raw.x))),
+          label: c => (c.datasetIndex === 2 ? `Typical: ${fmtY(c.raw.y)} · middle half ${fmtY(c.raw.lo)} to ${fmtY(c.raw.hi)}` : `${c.dataset.label}: ${fmtY(c.parsed.y)}`) } } },
+      scales: baseScales({ ticks: { callback: fmtY } }, { type: 'linear', ticks: { callback: v => v } }),
+    } });
   }
   $$('[data-ladder-tc]', sec).forEach(btn => btn.onclick = () => { ladderState.ltc = btn.dataset.ladderTc; ladderState.a = ladderState.b = null; renderLadder(sec); });
   const ladA = $('#ladA', sec);
@@ -347,4 +328,5 @@ async function renderLadder(sec) {
   const meB = $('#ladMe', sec);
   if (meB) meB.onclick = () => { ladderState.me = !me; ladderState.b = ladderState.me ? nearestBand(bands, you.band) : null; renderLadder(sec); };
   $('#ladB', sec).onchange = e => { ladderState.b = +e.target.value; renderLadder(sec); };
+  $('#ladTrend', sec).onchange = e => { ladderState.trend = e.target.value; renderLadder(sec); };
 }

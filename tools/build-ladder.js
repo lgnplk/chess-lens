@@ -1,32 +1,30 @@
 // One-time build of js/ladder.json (not loaded by the app). Run inside the desktop app (native Stockfish 19),
 // started with the project folder as its site (desktop/main.js: CL_SITE=.. CL_PROFILE=../.ladder-build), in DevTools:
-//   await loadScript('tools/build-ladder.js?' + Date.now()); LB.start();   …   LB.status   …   JSON.stringify(LB.build())
+//   await loadScript('tools/build-ladder.js?' + Date.now()); LB.start();   …   LB.status   …   JSON.stringify(await LB.build())
 //
-// v3 design, for accuracy per hour:
-// • Sampling. "Focus" players are found by walking opponents; each time control × 100-point band ("cell") gets up
-//   to FOCUS_QUOTA of them, always drawn from the emptiest cell. Each gives habits from its latest 50 rated games
-//   and engine numbers from 16 of them.
+// v4 design, for accuracy per hour:
+// • Sampling. "Focus" players are found by walking opponents; each time control × 250-point band ("cell") gets up
+//   to a quota of them, always drawn from the emptiest cell. Each gives habits from its latest 50 rated games
+//   and engine numbers from 20 of them.
 // • Both sides of every game count. Each downloaded game also gives the opponent's habits, and each analysed game
-//   the opponent's accuracy and blunders, so a band holds hundreds of distinct players, not just the focus ones.
+//   the opponent's engine numbers, so a band holds thousands of distinct players, not just the focus ones.
 //   A player's band is the median of their rating over the games used.
 // • Measurement noise is removed. A player's value from a few games is their true level plus game-to-game luck.
 //   The luck's size is measured from focus players' games (within-player variance, pooled over nearby bands) and
 //   taken out with a random-effects model: values are pulled toward the local trend by exactly the share of
 //   their spread that is noise, so band medians and percentiles describe players, not lucky samples.
-// • Sliding window. Each band centre pools every player of the time control with Gaussian weights by rating
-//   (trend-corrected; see kernelFit), so bands borrow strength from neighbours and 12 focus players per cell suffice.
-// • Engine. Stockfish 19, depth 12, the desktop app's scan depth, with 1 line instead of the app's 3: 2.5× faster, and
-//   on a 48-side test the same accuracy (mean difference 0.01, per-game spread 0.86 vs 8.3 between games) and blunders.
-//   A separate loop re-analyses a sample of games with the browser engine (Stockfish 10, the website's) to fit
-//   the mapping the website applies; it never holds up the main engines.
+// • Sliding window. Each band pools every player of the time control with Gaussian weights by rating
+//   (trend-corrected; see kernelFit), so bands borrow strength from neighbours.
+// • Engine. Stockfish 19, depth 12, top 3 lines: exactly the desktop app's scan, so the performance numbers
+//   (only moves found, sound sacrifices taken, hard refutations) are measured the same way for you and the ladder.
 // Progress is saved in IndexedDB and resumes after a reload.
 (() => {
-const FOCUS_QUOTA = 12, HABIT_GAMES = 50, ENGINE_GAMES = 16, OPP_CAP = 800, MIN_GAMES = 10;
-const CRAWLERS = 5, MAX_MONTHS = 6, BATCH = 12, NATIVE_N = 24, WASM_N = 4, DEPTH = 12, MULTIPV = 1;
-const CALIB_GAMES = 400, CALIB_EVERY = 8, MAX_MIN = 24 * 60;
-const KEY = 'cl:ladder:build:v3';
+const HABIT_GAMES = 50, OPP_CAP = 2000, MIN_GAMES = 10;
+const CRAWLERS = 6, MAX_MONTHS = 6, BATCH = 12, NATIVE_N = 30, DEPTH = 12, MULTIPV = 3;
 const SEEDS = ['gogangoblin', 'magnuschace', 'jcbmrk', 'hikaru', 'danielnaroditsky'];
-const LB = window.LB = { players: new Map(), visited: new Set(), frontier: {}, pending: [], calibQ: [], calib: [], status: 'idle', stop: false, running: false, errors: 0, analysed: 0 };
+// quota: focus players per cell; engineGames: analysed games per focus player; minutes: time budget; key: saved state
+const OPTS = { quota: 40, engineGames: 20, minutes: 48 * 60, key: 'cl:ladder:build:v4' };
+const LB = window.LB = { players: new Map(), visited: new Set(), frontier: {}, pending: [], status: 'idle', stop: false, running: false, errors: 0, analysed: 0, opts: { ...OPTS } };
 
 const cellOf = (tc, r) => `${tc}:${ladderBandOf(r)}`;
 const pkey = (tc, user) => `${tc}|${user.toLowerCase()}`;
@@ -67,7 +65,7 @@ function addFrontier(tc, rating, name) {
 }
 function pick() {
   const c = counts().focus;
-  const open = Object.entries(LB.frontier).filter(([k, s]) => (c[k] || 0) < FOCUS_QUOTA && s.size);
+  const open = Object.entries(LB.frontier).filter(([k, s]) => (c[k] || 0) < LB.opts.quota && s.size);
   if (!open.length) return null;
   const least = Math.min(...open.map(([k]) => c[k] || 0));
   const choices = open.filter(([k]) => (c[k] || 0) === least);
@@ -99,8 +97,8 @@ async function visit(user) {
     }
     if (gs.length < MIN_GAMES) continue;
     const c = cellOf(tc, median(gs.map(g => g.me.rating)));
-    if ((focus[c] || 0) >= FOCUS_QUOTA) continue;
-    // a focus player: their own side of all 50 games, and 16 of them for the engine
+    if ((focus[c] || 0) >= LB.opts.quota) continue;
+    // a focus player: their own side of all 50 games, and 20 of them for the engine
     const p = player(tc, user, null);
     p.focus = true;
     for (const g of gs) {
@@ -110,14 +108,18 @@ async function visit(user) {
       p.ratings.push(g.me.rating); p.h.push(row); p.hg.add(g.id);
     }
     focus[c] = (focus[c] || 0) + 1;
-    const eg = gs.filter(g => g.plies >= 20 && !p.eg.has(g.id)).slice(0, ENGINE_GAMES);
+    LB.lastFocusAt = performance.now();
+    const eg = gs.filter(g => g.plies >= 20 && !p.eg.has(g.id)).slice(0, LB.opts.engineGames);
     LB.pending.push({ tc, games: eg.map(g => ({ ...g, id: null, gid: g.id, focusUser: user, focusColor: g.color, oppName: g.opp.name, myRating: g.me.rating, oppRating: g.opp.rating })) });
   }
 }
 
+// once the bands that exist are full, only near-empty ones (3000+ rapid, say) are left open: stop when 30 minutes
+// pass without a new focus player instead of searching for them until the time budget runs out
+const stalled = () => performance.now() - (LB.lastFocusAt ?? LB.t0) > 30 * 60000;
 async function crawler() {
-  while (!LB.stop && !LB.timeUp()) {
-    if (LB.pending.length > 120) { await sleep(1000); continue; } // let the engine catch up
+  while (!LB.stop && !LB.timeUp() && !stalled()) {
+    if (LB.pending.length > 120) { LB.lastFocusAt = performance.now(); await sleep(1000); continue; } // let the engine catch up (not a stall)
     const user = LB.seeds.length ? LB.seeds.shift() : pick();
     if (!user) { if (!LB.pending.length && LB.engineIdle) break; await sleep(1000); continue; }
     if (LB.visited.has(user) && !LB.seedSet.has(user)) continue;
@@ -126,17 +128,26 @@ async function crawler() {
 }
 
 // ---------- engine ----------
-// both sides of an analysed game: [accuracy, blunders, counted moves]
-const sideRow = (a, c) => {
+// one side of an analysed game, measured as the app's scan measures you (aggregateScan, styleRecords):
+// [accuracy, blunders, counted moves, was winning (+3), was losing (−3), score,
+//  only moves found, only-move chances, brilliance hits, brilliance chances (sound sacrifices on offer + hard refutations)]
+function engineRow(g, a, c) {
   const ms = a.moves.filter(m => m.color === c && m.cls !== 'book' && m.cls !== 'forced');
   const acc = a.summary?.[c]?.accuracy;
-  return acc == null || ms.length < 5 ? null : [acc, ms.filter(m => m.loss >= 20).length, ms.length];
-};
+  if (acc == null || ms.length < 5) return null;
+  const sign = c === 'w' ? 1 : -1, evs = a.evals.map(e => evalToCp(e) * sign);
+  const recs = a._style?.[c === 'w' ? 'white' : 'black'] || [];
+  const tally = key => { const xs = recs.filter(r => r[key] !== undefined); return [xs.filter(r => r[key]).length, xs.length]; };
+  const [ck, cn] = tally('critical'), [sk, sn] = tally('sacOpp'), [pk, pn] = tally('punishHard');
+  const s = scoreOf(g);
+  return [acc, ms.filter(m => m.loss >= 20).length, ms.length, Math.max(...evs) >= 300 ? 1 : 0, Math.min(...evs) <= -300 ? 1 : 0,
+    c === g.focusColor[0] ? s : 1 - s, ck, cn, sk + pk, sn + pn];
+}
 
 function record(g, a) {
   const focusSide = g.focusColor[0];
   for (const c of ['w', 'b']) {
-    const row = sideRow(a, c);
+    const row = engineRow(g, a, c);
     if (!row) continue;
     const mine = c === focusSide;
     const p = player(g.timeClass, mine ? g.focusUser : g.oppName, null);
@@ -144,8 +155,7 @@ function record(g, a) {
     if (!mine) p.ratings.push(g.oppRating); // the focus player's ratings are already in from their habits
     p.e.push(row); p.eg.add(g.gid);
   }
-  if (++LB.analysed % CALIB_EVERY === 0 && LB.calib.length + LB.calibQ.length < CALIB_GAMES)
-    LB.calibQ.push({ g, s19: { w: sideRow(a, 'w'), b: sideRow(a, 'b') } });
+  LB.analysed++;
 }
 
 async function engineLoop(native) {
@@ -159,41 +169,31 @@ async function engineLoop(native) {
   }
 }
 
-// the website's engine on a sample of the same games, in the background
-async function calibLoop(wasm) {
-  while (!LB.stop) {
-    if (!LB.calibQ.length) { if (LB.crawlersDone && LB.engineIdle) break; await sleep(2000); continue; }
-    const items = LB.calibQ.splice(0, WASM_N);
-    const byGame = new Map(items.map(it => [it.g, it]));
-    await analyzeGamesParallel(items.map(it => it.g), DEPTH, { engines: wasm, verify: false,
-      onResult: (g, a) => { const it = byGame.get(g); for (const c of ['w', 'b']) { const r10 = sideRow(a, c), r19 = it.s19[c]; if (r10 && r19) LB.calib.push([r10, r19]); } } });
-  }
-}
-
 // ---------- persistence ----------
 async function save() {
-  await evalDB.set(KEY, {
+  await evalDB.set(LB.opts.key, {
     players: [...LB.players.values()].map(p => ({ ...p, hg: [...p.hg], eg: [...p.eg] })),
     visited: [...LB.visited], frontier: Object.fromEntries(Object.entries(LB.frontier).map(([k, s]) => [k, [...s]])),
-    pending: LB.pending, calib: LB.calib, analysed: LB.analysed,
+    pending: LB.pending, analysed: LB.analysed,
   });
 }
 async function load() {
-  const s = await evalDB.get(KEY);
+  const s = await evalDB.get(LB.opts.key);
   if (!s) return;
   LB.players = new Map(s.players.map(p => [pkey(p.tc, p.user), { ...p, hg: new Set(p.hg), eg: new Set(p.eg) }]));
-  LB.visited = new Set(s.visited); LB.pending = s.pending || []; LB.calib = s.calib || []; LB.analysed = s.analysed || 0;
+  LB.visited = new Set(s.visited); LB.pending = s.pending || []; LB.analysed = s.analysed || 0;
   LB.frontier = Object.fromEntries(Object.entries(s.frontier).map(([k, a]) => [k, new Set(a)]));
 }
 
-LB.timeUp = () => (performance.now() - LB.t0) / 60000 > MAX_MIN;
+LB.timeUp = () => (performance.now() - LB.t0) / 60000 > LB.opts.minutes;
 LB.more = n => { for (let i = 0; i < n; i++) crawler(); return `${n} more crawlers`; };
 // load the saved build without crawling (to rebuild ladder.json from it)
-LB.load = async () => { await load(); return `${LB.players.size} players loaded`; };
+LB.load = async (opts = {}) => { Object.assign(LB.opts, opts); await load(); return `${LB.players.size} players loaded`; };
 LB.halt = () => { LB.stop = true; return "stopping after the current batch (a minute or two; progress is saved)"; };
 
-LB.start = async () => {
+LB.start = async (opts = {}) => {
   if (LB.running) return 'already running';
+  Object.assign(LB.opts, opts);
   const native = getAnalysisPool(NATIVE_N);
   if (!native[0]?.native) return 'needs the desktop app (native Stockfish)';
   LB.running = true; LB.stop = false; LB.t0 = performance.now(); LB.crawlersDone = false;
@@ -208,14 +208,14 @@ LB.start = async () => {
   const tick = setInterval(() => {
     const { focus } = counts(), ps = [...LB.players.values()];
     LB.status = `${ps.filter(p => p.focus).length} focus players, ${ps.length} players in all (${ps.filter(p => p.e.length).length} with engine data), ` +
-      `${Object.values(focus).filter(v => v >= FOCUS_QUOTA).length} full cells, ${LB.pending.length} queued, ${LB.analysed} games analysed, ` +
-      `${LB.calib.length}/${CALIB_GAMES * 2} calibration pairs, ${LB.visited.size} visited, ${LB.errors} errors, ${Math.round((performance.now() - LB.t0) / 60000)} min` +
+      `${Object.values(focus).filter(v => v >= LB.opts.quota).length} full cells, ${LB.pending.length} queued, ${LB.analysed} games analysed, ` +
+      `${LB.visited.size} visited, ${LB.errors} errors, ${Math.round((performance.now() - LB.t0) / 60000)} min` +
       (LB.lastBatch ? `, last batch ${LB.lastBatch.games} games in ${LB.lastBatch.secs}s` : '');
   }, 3000);
-  const eng = engineLoop(native), cal = calibLoop(getEnginePool(WASM_N));
+  const eng = engineLoop(native);
   await Promise.all(Array.from({ length: CRAWLERS }, () => crawler()));
   LB.crawlersDone = true;
-  await eng; await cal;
+  await eng;
   clearInterval(saver); clearInterval(tick);
   await save();
   LB.running = false;
@@ -224,24 +224,41 @@ LB.start = async () => {
 };
 
 // ---------- the published file ----------
-// metric: per-game [numerator, denominator] from a player's rows, and a scale
+// metric: per-game [numerator, denominator] from a player's rows, and a scale. kind: 'rate' (per-move rates and
+// accuracy; noise measured from repeat games), 'binary' (yes/no outcomes per game or per chance; binomial noise),
+// 'spread' (a player's game-to-game SD of accuracy; noise from the sampling variance of a variance)
 const METRICS = {
-  accuracy:    { rows: 'e', of: r => [r[0], 1], scale: 1 },
-  blunders:    { rows: 'e', of: r => [r[1], r[2]], scale: 100 },
-  checks:      { rows: 'h', of: r => [r[0], r[3]], scale: 100 },
-  captures:    { rows: 'h', of: r => [r[1], r[3]], scale: 100 },
-  pawns:       { rows: 'h', of: r => [r[2], r[3]], scale: 100 },
-  castleEarly: { rows: 'h', of: r => (r[4] < 0 ? null : [r[4], 1]), scale: 100 },
-  earlyQueen:  { rows: 'h', of: r => [r[5], 1], scale: 100 },
-  timeTrouble: { rows: 'h', of: r => (r[6] < 0 ? null : [r[6], 1]), scale: 100 },
+  accuracy:    { rows: 'e', of: r => [r[0], 1], scale: 1, kind: 'rate' },
+  blunders:    { rows: 'e', of: r => [r[1], r[2]], scale: 100, kind: 'rate' },
+  conversion:  { rows: 'e', of: r => (r[3] ? [r[5], 1] : null), scale: 100, kind: 'binary' },
+  resilience:  { rows: 'e', of: r => (r[4] ? [r[5], 1] : null), scale: 100, kind: 'binary' },
+  brilliance:  { rows: 'e', of: r => (r[9] ? [r[8], r[9]] : null), scale: 100, kind: 'binary' },
+  clutch:      { rows: 'e', of: r => (r[7] ? [r[6], r[7]] : null), scale: 100, kind: 'binary' },
+  consistency: { rows: 'e', scale: 1, kind: 'spread' },
+  checks:      { rows: 'h', of: r => [r[0], r[3]], scale: 100, kind: 'rate' },
+  captures:    { rows: 'h', of: r => [r[1], r[3]], scale: 100, kind: 'rate' },
+  pawns:       { rows: 'h', of: r => [r[2], r[3]], scale: 100, kind: 'rate' },
+  castleEarly: { rows: 'h', of: r => (r[4] < 0 ? null : [r[4], 1]), scale: 100, kind: 'binary' },
+  earlyQueen:  { rows: 'h', of: r => [r[5], 1], scale: 100, kind: 'binary' },
+  timeTrouble: { rows: 'h', of: r => (r[6] < 0 ? null : [r[6], 1]), scale: 100, kind: 'binary' },
 };
 
 // a player's value: scale·Σnum/Σden, with Σden (its sample size) and per-game rates for the within-player variance
 function measure(p, m) {
+  if (m.kind === 'spread') return measureSpread(p[m.rows].map(r => r[0]));
   const xs = p[m.rows].map(m.of).filter(x => x && x[1] > 0);
   if (!xs.length) return null;
   const A = sum(xs.map(x => x[0])), M = sum(xs.map(x => x[1]));
   return { r: A / M, M, xs };
+}
+// game-to-game spread of accuracy: the unbiased variance k2 (r) with its degrees of freedom (M), and the fourth
+// k-statistic k4 (unbiased for the fourth cumulant), which sets how noisy a variance from n games is
+function measureSpread(accs) {
+  const n = accs.length;
+  if (n < 4) return null;
+  const m = mean(accs), m2 = mean(accs.map(x => (x - m) ** 2)), m4 = mean(accs.map(x => (x - m) ** 4));
+  const k2 = n * m2 / (n - 1), k4 = n * n * ((n + 1) * m4 - 3 * (n - 1) * m2 * m2) / ((n - 1) * (n - 2) * (n - 3));
+  return { r: k2, M: n - 1, n, k4 };
 }
 
 // within-player variance per unit of denominator: Σ m (r_i − r̄)² / Σ(n − 1), over players with 2+ games
@@ -253,6 +270,18 @@ function withinVar(items) {
     df += it.xs.length - 1;
   }
   return df ? { s2: ss / df, df } : null;
+}
+// excess-kurtosis ratio κ = κ4/σ⁴ of single-game accuracy around a player's own level, pooled over players with
+// 8+ games (k4 is unbiased; σ⁴ is estimated from k2², whose own noise is taken out by a short fixed point)
+function kurtosisRatio(items) {
+  const xs = items.filter(x => x.n >= 8);
+  if (xs.length < 20) return null;
+  let kap = 0;
+  for (let it = 0; it < 6; it++) {
+    const s4 = xs.map(x => x.r * x.r / (1 + 2 / x.M + kap / x.n));
+    kap = Math.max(-1.5, sum(xs.map(x => x.n * x.k4)) / sum(xs.map((x, i) => x.n * s4[i])));
+  }
+  return kap;
 }
 
 const quant = (xs, p) => { const s = [...xs].sort((a, b) => a - b); const i = (s.length - 1) * p, lo = Math.floor(i); return s[lo] + (s[Math.ceil(i)] - s[lo]) * (i - lo); };
@@ -267,28 +296,23 @@ function wquantiles(vals, ws, k = 21) {
   }
   return out;
 }
-// Deming regression (equal error variance in both engines' measurements): y = a + b·x
-function deming(pairs) {
-  const n = pairs.length, mx = mean(pairs.map(p => p[0])), my = mean(pairs.map(p => p[1]));
-  const sxx = sum(pairs.map(([x]) => (x - mx) ** 2)) / n, syy = sum(pairs.map(([, y]) => (y - my) ** 2)) / n, sxy = sum(pairs.map(([x, y]) => (x - mx) * (y - my))) / n;
-  const b = (syy - sxx + Math.sqrt((syy - sxx) ** 2 + 4 * sxy ** 2)) / (2 * sxy);
-  return { a: +(my - b * mx).toFixed(4), b: +b.toFixed(4), r: +(sxy / Math.sqrt(sxx * syy)).toFixed(3), n };
-}
 
-// A band's estimate from one 100-point slice is noisier than the real change between neighbouring bands, so each
+// A band's estimate from its own players alone is noisier than the real change between neighbouring bands, so each
 // band centre R borrows from every player of the time control through a sliding window:
 // • Gaussian weights around R (bandwidth H0, cut at CUT·h), widened where data is thin until the weights add up
 //   to MIN_EFF players (at most HMAX); the bandwidth used is recorded per band.
 // • The rating trend is taken out: a weighted local-linear fit of the metric on rating, so the band's level is the
 //   fit at R and a wide window doesn't drag in the level of stronger/weaker players the way a fixed wide band would.
 // • Random effects: each player's value = trend + their true offset + game-to-game noise. The noise variance is
-//   known per player (yes/no habits: binomial, exact; rates and accuracy: measured from players with repeat games),
-//   and the true spread τ² is a precision-weighted (REML-style) estimate, so well-measured players carry it.
-// • The band is then described by its fitted distribution of true levels: Beta(mean, τ²) for yes/no habits (stays
+//   known per player (yes/no outcomes: binomial, exact; rates and accuracy: measured from players with repeat
+//   games; spread: the sampling variance of a variance, from n and the kurtosis), and the true spread τ² is a
+//   precision-weighted (REML-style) estimate, so well-measured players carry it.
+// • The band is then described by its fitted distribution of true levels: Beta(mean, τ²) for yes/no outcomes (stays
 //   within 0–100%), Normal(mean, τ²) otherwise (kept ≥ 0). Medians, quartiles and the TC-wide percentiles come
 //   from these (seeded draws), not from individually shrunk players, whose single-game values would cluster.
-const H0 = 125, HMAX = 400, CUT = 2.5, MIN_EFF = 150, DRAWS = 4000, TAU_SMOOTH = 150;
-const BINARY = new Set(['castleEarly', 'earlyQueen', 'timeTrouble']);
+const H0 = 125, HMAX = 400, CUT = 2.5, DRAWS = 4000, TAU_SMOOTH = 150;
+// players the window must hold; a spread needs several games per player, so fewer (mostly focus) players carry it
+const MIN_EFF = { rate: 150, binary: 150, spread: 60 };
 const wsum = (xs, ws) => xs.reduce((s, x, i) => s + x * ws[i], 0);
 const clamp01 = p => Math.min(0.999, Math.max(0.001, p));
 
@@ -316,35 +340,42 @@ function drawBand(f, binary, seed) {
   return out;
 }
 
-// items: [{ rating, r, M, xs }] (r unscaled: a proportion, a per-move rate, or accuracy); returns the fit at R
-function kernelFit(items, R, binary) {
+// items: [{ rating, r, M, xs }] (r unscaled: a proportion, a per-move rate, accuracy or a variance); returns the fit at R
+function kernelFit(items, R, kind) {
+  const binary = kind === 'binary', spread = kind === 'spread';
   let h = H0, sel, w;
   for (;;) {
     sel = items.filter(x => Math.abs(x.rating - R) <= CUT * h);
     w = sel.map(x => Math.exp(-0.5 * ((x.rating - R) / h) ** 2));
-    if (sum(w) >= MIN_EFF || h >= HMAX) break;
+    if (sum(w) >= MIN_EFF[kind] || h >= HMAX) break;
     h = Math.min(HMAX, h * 1.25);
   }
   if (sel.length < 30) return null;
   // game-to-game variance for rates/accuracy: from the window's repeat players, wider if too few
-  let s2 = null;
-  if (!binary) {
+  let s2 = null, kap = null;
+  if (kind === 'rate') {
     let wv = withinVar(sel);
     if (!wv || wv.df < 60) wv = withinVar(items.filter(x => Math.abs(x.rating - R) <= 400));
     if (!wv || wv.df < 60) wv = withinVar(items);
     if (!wv) return null;
     s2 = wv.s2;
   }
+  if (spread) {
+    kap = kurtosisRatio(sel) ?? kurtosisRatio(items.filter(x => Math.abs(x.rating - R) <= 400)) ?? kurtosisRatio(items);
+    if (kap == null) return null;
+  }
   const d = sel.map(x => x.rating - R), y = sel.map(x => x.r), M = sel.map(x => x.M), W = sum(w);
-  // noise variance of each player's value: binomial for yes/no habits (E[p(1−p)] = μ(1−μ) − τ² at their rating)
+  // noise variance of each player's value: binomial for yes/no outcomes (E[p(1−p)] = μ(1−μ) − τ² at their rating);
+  // for a variance from n games, (E[σ⁴])·(2/(n−1) + κ/n) with E[σ⁴] = μ² + τ²
   const noise = (alpha, beta, tau2) => binary
     ? M.map((Mi, i) => { const p = clamp01(alpha + beta * d[i]); return Math.max(1e-6, p * (1 - p) - tau2) / Mi; })
+    : spread ? M.map((Mi, i) => { const mu = Math.max(1e-6, alpha + beta * d[i]); return (mu * mu + tau2) * Math.max(1e-3, 2 / Mi + kap / (Mi + 1)); })
     : M.map(Mi => s2 / Mi);
   let alpha = wsum(y, w) / W, beta = 0;
   let v = noise(alpha, 0, 0);
   const vMed = quant(v, 0.5);
   let tau2 = Math.max(0.1 * vMed, wsum(y.map(yi => (yi - alpha) ** 2), w) / W - wsum(v, w) / W);
-  for (let it = 0; it < 60; it++) {
+  for (let it = 0; it < 80; it++) {
     v = noise(alpha, beta, tau2);
     // weighted least squares y = α + β·d, weights = window × precision
     const a = w.map((wi, i) => wi / (tau2 + v[i]));
@@ -359,7 +390,8 @@ function kernelFit(items, R, binary) {
     tau2 = next;
   }
   if (binary) alpha = clamp01(alpha);
-  return { h, W, n: sel.length, alpha, beta, tau2, sdGame: binary ? Math.sqrt(alpha * (1 - alpha)) : Math.sqrt(s2) };
+  const sdGame = binary ? Math.sqrt(alpha * (1 - alpha)) : spread ? null : Math.sqrt(s2);
+  return { h, W, n: sel.length, alpha, beta, tau2, sdGame, kap };
 }
 
 // the rating CDF of a time control from [rating, percentile] points: sorted, made monotone, piecewise linear
@@ -372,50 +404,53 @@ function cdfFrom(points) {
     let i = 1; while (xs[i] < r) i++; const f = (r - xs[i - 1]) / (xs[i] - xs[i - 1] || 1); return ys[i - 1] + f * (ys[i] - ys[i - 1]); };
 }
 
-LB.build = () => {
-  const out = { version: 3, built: new Date().toISOString().slice(0, 10), engine: 'Stockfish 19', depth: DEPTH, multipv: MULTIPV,
+LB.build = async () => {
+  // the browser-engine mapping is kept from the published file (the desktop app scans with Stockfish 19 itself)
+  const prev = await fetch('js/ladder.json').then(r => r.json()).catch(() => null);
+  LB.ratingDist ||= await fetch('tools/rating-dist.json').then(r => r.json()).catch(() => null);
+  const out = { version: 4, built: new Date().toISOString().slice(0, 10), engine: 'Stockfish 19', depth: DEPTH, multipv: MULTIPV,
     method: 'both sides of every game; sliding trend-corrected rating window; random effects (noise removed); bands described by their fitted distributions',
-    bandWidth: LADDER_BAND, window: { start: H0, max: HMAX, minPlayers: MIN_EFF }, calib: {}, calibFit: {}, tc: {} };
-  // website calibration
-  const cal = { accuracy: LB.calib.map(([a, b]) => [a[0], b[0]]), blunders: LB.calib.map(([a, b]) => [100 * a[1] / a[2], 100 * b[1] / b[2]]) };
-  for (const [k, pairs] of Object.entries(cal)) if (pairs.length >= 60) { const f = deming(pairs); out.calib[k] = [f.a, f.b]; out.calibFit[k] = { r: f.r, n: f.n }; }
+    bandWidth: LADDER_BAND, window: { start: H0, max: HMAX, minPlayers: MIN_EFF }, calib: prev?.calib || {}, calibFit: prev?.calibFit || {}, tc: {} };
 
   for (const tc of LADDER_TCS) {
     const ps = [...LB.players.values()].filter(p => p.tc === tc && p.ratings.length).map(p => ({ p, rating: bandRating(p) }));
     const inBand = groupBy(ps, x => ladderBandOf(x.rating));
-    // report every 100-point band that has players of its own (no extrapolation into empty rating ranges)
+    // report every band that has players of its own (no extrapolation into empty rating ranges); its centre is the
+    // median rating of those players (the lowest band starts at chess.com's floor of 100, the top one is thin)
     const bands = [...inBand.keys()].filter(b => inBand.get(b).length >= 5).sort((a, b) => a - b);
     const cells = Object.fromEntries(bands.map(b => [b, { n: inBand.get(b).length, nFocus: inBand.get(b).filter(x => x.p.focus).length,
+      centre: Math.round(median(inBand.get(b).map(x => x.rating))),
       median: {}, p25: {}, p75: {}, mean: {}, sdPlayers: {}, sdGame: {}, slope: {}, window: {}, nEff: {} }]));
     const quantiles = {};
     const popCdf = LB.ratingDist?.[tc] ? cdfFrom(LB.ratingDist[tc]) : null;
     if (popCdf) out.population = { ...(out.population || {}), [tc]: LB.ratingDist[tc] };
     for (const [key, m] of Object.entries(METRICS)) {
-      const binary = BINARY.has(key), sc = m.scale, cap = key === 'accuracy' ? 100 : Infinity;
+      const binary = m.kind === 'binary', spread = m.kind === 'spread', sc = m.scale, cap = binary || key === 'accuracy' ? 100 : Infinity;
       const items = ps.map(x => ({ ...x, ...(measure(x.p, m) || {}) })).filter(x => x.M);
       const pooled = [];
-      const fits = Object.fromEntries(bands.map(b => [b, kernelFit(items, b + LADDER_BAND / 2, binary)]).filter(([, f]) => f));
+      const fits = Object.fromEntries(bands.map(b => [b, kernelFit(items, cells[b].centre, m.kind)]).filter(([, f]) => f));
       // The true spread changes slowly with rating, but each band's estimate of it rests on the few repeat-game players
       // near it, so it jitters band to band. Smooth it across neighbouring bands (Gaussian, σ = TAU_SMOOTH, weighted
       // by each band's sample) before drawing the band distributions.
       const fb = Object.keys(fits).map(Number);
       for (const b of fb) {
-        const ws = fb.map(o => fits[o].W * Math.exp(-0.5 * ((o - b) / TAU_SMOOTH) ** 2));
+        const ws = fb.map(o => fits[o].W * Math.exp(-0.5 * ((cells[o].centre - cells[b].centre) / TAU_SMOOTH) ** 2));
         fits[b].tau2s = wsum(fb.map(o => fits[o].tau2), ws) / sum(ws);
       }
       for (const b of bands) {
         const f0 = fits[b];
         if (!f0) continue;
         const f = { ...f0, tau2: f0.tau2s };
-        const draws = drawBand(f, binary, hashSeed(`${tc}:${key}:${b}`)).map(x => Math.min(cap, sc * x));
+        // a spread is fitted as a variance and published as an SD (accuracy points)
+        const draws = drawBand(f, binary, hashSeed(`${tc}:${key}:${b}`)).map(x => Math.min(cap, sc * (spread ? Math.sqrt(x) : x)));
         const c = cells[b];
         c.median[key] = +quant(draws, 0.5).toFixed(3);
         c.p25[key] = +quant(draws, 0.25).toFixed(3);
         c.p75[key] = +quant(draws, 0.75).toFixed(3);
-        c.mean[key] = +(sc * f.alpha).toFixed(3);
-        c.sdPlayers[key] = +(sc * Math.sqrt(f.tau2)).toFixed(3);
-        c.sdGame[key] = +(sc * f.sdGame).toFixed(3);
-        c.slope[key] = +(sc * f.beta * 100).toFixed(3);   // per 100 rating points
+        c.mean[key] = +(spread ? mean(draws) : sc * f.alpha).toFixed(3);
+        c.sdPlayers[key] = +(spread ? Math.sqrt(mean(draws.map(x => (x - c.mean[key]) ** 2))) : sc * Math.sqrt(f.tau2)).toFixed(3);
+        if (f.sdGame != null) c.sdGame[key] = +(sc * f.sdGame).toFixed(3);
+        c.slope[key] = +(spread ? f.beta * 100 / (2 * Math.sqrt(Math.max(1e-6, f.alpha))) : sc * f.beta * 100).toFixed(3);   // per 100 rating points
         c.window[key] = Math.round(f.h);
         c.nEff[key] = Math.round(f.W);
         pooled.push({ b, draws });

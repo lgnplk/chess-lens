@@ -47,25 +47,32 @@ bot, Arena). Copy is kept to a minimum.
 
 ## Rating ladder
 
-`js/ladder.json` holds the typical chess.com player of every 100-point band, for bullet, blitz and rapid, built once
-by `tools/build-ladder.js` (about 46,000 players) and shipped as a file.
+`js/ladder.json` holds the typical chess.com player of every 250-point band (<250, 250–499, … ), for bullet,
+blitz and rapid, built once by `tools/build-ladder.js` (52,462 players) and shipped as a file.
 
-- **Sample.** Players are found by walking opponents; each time control × band gets 12 "focus" players with 50
-  games of habits and 16 games through Stockfish 19 (depth 12). Both sides of every game count, so each band holds
-  hundreds of players.
+- **Sample.** Players are found by walking opponents; each time control × band gets about 40 "focus" players with
+  50 games of habits and 20 games through Stockfish 19 (depth 12, top 3 lines: the app's own scan). Both sides of
+  every game count, so each band holds thousands of players.
+- **What is measured.** Style: checks, captures, pawn moves, early castling, early queen, time trouble.
+  Performance: accuracy, blunders, conversion (score from +3), resilience (score from −3), brilliance (sound
+  sacrifices taken and hard refutations found), consistency (game-to-game swing in accuracy) and clutch (only
+  moves found), each counted exactly as the app counts your scanned games.
 - **Noise removed.** A player's numbers from a few games are their real level plus luck. The game-to-game swing is
   measured from players with many games and removed with a random-effects model, so medians, quartiles and
-  percentiles describe players, not lucky samples.
+  percentiles describe players, not lucky samples. (For consistency, which is itself a spread, the noise is the
+  sampling error of a variance, from the number of games and the measured kurtosis.)
 - **Sliding window.** Each band pools nearby ratings with Gaussian weights, after correcting for the rating trend,
   and widens where players are scarce.
 - **Radar scale.** Each axis is a percentile among all chess.com players of that time control: bands are weighted
-  by chess.com's published rating distribution (`tools/rating-dist.json`). "Few blunders" is inverted.
-- **Where it shows.** Insights → *Ladder* (two bands, or *Compare my radar*), Style → *Your shape*, Head to head.
+  by chess.com's published rating distribution (`tools/rating-dist.json`). "Few blunders" and consistency are
+  inverted (fewer, smaller swings = outward).
+- **Where it shows.** Insights → *Ladder* (two bands, or *Compare my radar*), Style → *Shape*, Head to head.
 
-Rebuild: run the app from source with `CL_SITE=.. CL_PROFILE=../.ladder-build`, then in DevTools
-`await loadScript('tools/build-ladder.js'); LB.start()`; when done, set `LB.ratingDist` from
-`tools/rating-dist.json` and save `JSON.stringify(LB.build())` as `js/ladder.json`. Progress is kept in the app
-profile, so a restart resumes it (`LB.load()` reloads it without crawling).
+Rebuild: run the app from source with `CL_SITE=.. CL_PROFILE=../.ladder-build` (that profile also keeps the
+computer awake and the window at full speed), then in DevTools `await loadScript('tools/build-ladder.js');
+LB.start()` (options: `{ quota, engineGames, minutes }`); when done, save `JSON.stringify(await LB.build())` as
+`js/ladder.json`. Progress is kept in the app profile, so a restart resumes it (`LB.load()` reloads it without
+crawling).
 
 Maia-3 is AGPL-3.0: if you give the app to other people, offer them the source (see `MAIA.md`).
 

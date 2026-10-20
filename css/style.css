@@ -741,6 +741,9 @@ canvas.chart-in { animation: chart-in .16s ease-out; }
 
 /* Shape card: Style and Performance radars, and the bars view */
 .shape-grid { margin-top: 8px; }
+.shape-head { align-items: center; row-gap: 8px; margin-top: 2px; }
+.shape-head .band-pick { margin: 0; }
+.perf-sub:empty { display: none; }
 .pane-title { font-family: var(--serif); font-size: 19px; font-weight: 600; }
 .pane-note { text-align: center; margin-top: 4px; }
 .perf-pane.pending .perf-radar, .perf-pane.pending .perf-note { display: none; }

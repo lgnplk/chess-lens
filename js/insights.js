@@ -199,10 +199,16 @@ function aggregateScan(results) {
   const myMoves = [];
   const perGame = [];
   const recsMe = [], recsOpp = [], brilliantMoves = [];
+  // only-move and brilliance chances in one game ([found, chances]), counted as the ladder counts them (tools/build-ladder.js)
+  const chances = (who, recs) => {
+    const t = key => { const xs = recs.filter(r => r[key] !== undefined); return [xs.filter(r => r[key]).length, xs.length]; };
+    const [ck, cn] = t('critical'), [sk, sn] = t('sacOpp'), [pk, pn] = t('punishHard');
+    return { [who + 'Crit']: [ck, cn], [who + 'Bril']: [sk + pk, sn + pn] };
+  };
   for (const { game, analysis } of results) {
-    const mine = styleRecords(analysis, game.color);
+    const mine = styleRecords(analysis, game.color), theirs = styleRecords(analysis, game.color === 'white' ? 'black' : 'white');
     recsMe.push(...mine);
-    recsOpp.push(...styleRecords(analysis, game.color === 'white' ? 'black' : 'white'));
+    recsOpp.push(...theirs);
     mine.filter(r => r.brilliant).forEach(r => brilliantMoves.push({ game, ply: r.ply, san: r.san }));
     const c = game.color === 'white' ? 'w' : 'b';
     const ms = analysis.moves.filter(m => m.color === c);
@@ -219,6 +225,7 @@ function aggregateScan(results) {
         const counted = analysis.moves.filter(m => m.color === side && m.cls !== 'book' && m.cls !== 'forced');
         return [[who + 'Counted', counted.length], [who + 'Bl', counted.filter(m => m.loss >= 20).length]];
       })),
+      ...chances('my', mine), ...chances('opp', theirs),
     });
   }
   const phaseStats = ['opening', 'middlegame', 'endgame'].map(p => {

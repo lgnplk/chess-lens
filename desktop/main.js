@@ -3,7 +3,7 @@
 // relay that serve.js does in development) and runs native Stockfish processes for the page (see preload.js).
 //   npm start        run from source (uses ../site and ./stockfish)
 //   npm run dist     build the Windows installer into dist/
-const { app, BrowserWindow, ipcMain, shell, Menu, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Menu, dialog, powerSaveBlocker } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const http = require('http');
 const fs = require('fs');
@@ -109,8 +109,11 @@ async function createWindow() {
   const win = new BrowserWindow({
     width: 1400, height: 920, minWidth: 380, backgroundColor: '#14120f', title: 'Chess Lens',
     icon: path.join(__dirname, 'icon.png'),
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: false },
+    // a one-off job (CL_PROFILE, e.g. the ladder build) keeps full speed in a background window
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: false, backgroundThrottling: !process.env.CL_PROFILE },
   });
+  // ...and keeps the computer from idle-sleeping while it runs
+  if (process.env.CL_PROFILE) powerSaveBlocker.start('prevent-app-suspension');
   // links to chess.com, Lichess etc. open in the normal browser
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(`http://127.0.0.1:${port}`)) { e.preventDefault(); shell.openExternal(url); } });
