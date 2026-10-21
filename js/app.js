@@ -3,20 +3,20 @@ const S = { username: null, player: null, games: [], filtered: [], months: 3, ta
 
 const RENDERERS = {
   overview: renderOverview, games: renderGames, openings: renderOpenings, playstyle: renderPlaystyle,
-  analytics: renderAnalytics, insights: renderInsights, prepare: renderPrepare, bot: renderBot, arena: renderArena, report: renderReport,
+  analytics: renderAnalytics, insights: renderInsights, prepare: renderPrepare, learn: renderLearn, bot: renderBot, arena: renderArena, report: renderReport,
 };
 
 // Sections (top row) and their pages (second row)
 const SECTIONS = {
   overview: [['overview', 'Summary'], ['analytics', 'Analytics'], ['report', 'Report']],
-  games: [['games', 'Games'], ['review', 'Review'], ['openings', 'Openings'], ['prepare', 'Prepare']],
+  games: [['games', 'Games'], ['review', 'Review'], ['openings', 'Openings'], ['learn', 'Learn'], ['prepare', 'Prepare']],
   insights: [['insights', 'Insights']],
   bots: [['bot', 'Your bot'], ['arena', 'Arena']],
 };
 const sectionOf = tab => Object.keys(SECTIONS).find(k => SECTIONS[k].some(([t]) => t === tab));
 const lastInSection = {};
 // without a loaded player only these pages work
-const GUEST_TABS = ['arena', 'insights', 'review'];
+const GUEST_TABS = ['arena', 'insights', 'review', 'learn'];
 const firstTab = sec => document.body.classList.contains('guest')
   ? SECTIONS[sec].map(([t]) => t).find(t => GUEST_TABS.includes(t)) : SECTIONS[sec][0][0];
 

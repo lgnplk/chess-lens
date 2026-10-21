@@ -779,3 +779,14 @@ canvas.chart-in { animation: chart-in .16s ease-out; }
 /* the header's time-control buttons */
 .tc-seg { margin-right: 4px; }
 @media (max-width: 640px) { .tc-seg { width: 100%; overflow-x: auto; flex-wrap: nowrap; } }
+
+/* Learn an opening */
+.learn-pick { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.learn-pick input { flex: 1; min-width: 200px; max-width: 420px; }
+.learn-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.learn-chips .sub { flex-basis: 100%; }
+.learn-chip { font: inherit; font-size: 13.5px; background: var(--surface-2); border: 1px solid var(--border); color: var(--ink); padding: 5px 10px; border-radius: 999px; cursor: pointer; }
+.learn-chip:hover { border-color: var(--border-strong); }
+.learn-moves { font-variant-numeric: tabular-nums; line-height: 1.9; margin: 10px 0; padding: 10px 12px; background: var(--surface-2); border-radius: 4px; }
+.learn-mine { font-weight: 700; }
+.learn-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }

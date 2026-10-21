@@ -42,7 +42,7 @@ Mentor doesn't allow browser cross-origin requests; the app's server does the sa
 ## Navigation
 
 Four sections: **Overview** (Summary with current ratings, Analytics, Report), **Games** (Games, Review,
-Openings, Prepare), **Insights** (one page: the engine scan, style and shape, accuracy, blunders, and the ladder by
+Openings, Learn, Prepare), **Insights** (one page: the engine scan, style and shape, accuracy, blunders, and the ladder by
 rating) and **Bots** (Your bot, Arena). Copy is kept to a minimum.
 
 ## Rating ladder
