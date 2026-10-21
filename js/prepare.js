@@ -1,8 +1,10 @@
-// Prepare tab: play against a player's opening repertoire, built from their games.
+// Prepare tab: play against a player: their opening repertoire, built from their games, and once they're out of
+// book, their player bot (js/bot.js: Maia-3 fitted to their strength, with a blunder check set to their own
+// blunder rate), so the whole game is played the way they play. Stockfish or stopping are the alternatives.
 const prep = {
   pick: { kind: 'chesscom', user: '', months: 3, title: 'GM', max: 300 },
   src: null, data: null, loading: false, error: null,
-  color: 'white', tc: 'all', mode: 'top', hints: true, fallback: true,
+  color: 'white', tc: 'all', mode: 'top', hints: true, fallback: 'bot',   // out of book: 'bot' | 'engine' | 'off'
   line: [], idx: 0, flipped: false, sub: 'position',
   trees: null, games: [], book: null,
   board: null, live: null, liveFen: null, liveLines: [], liveDone: false, botTimer: null, built: false,
@@ -32,6 +34,7 @@ async function setPrepSource(src, { color, line } = {}) {
     const tcs = new Set(prep.data.games.map(g => g.timeClass));
     if (prep.tc !== 'all' && !tcs.has(prep.tc)) prep.tc = 'all';
     rebuildTrees();
+    if (prep.fallback === 'bot') ensurePrepBot();   // built in the background, ready by the time they leave book
   } catch (e) {
     if (token !== prep.token) return;
     prep.error = e.message || String(e); prep.data = null; prep.trees = null;
@@ -63,7 +66,7 @@ function renderPrepare(sec) {
     sec.innerHTML = `
       <div class="card" style="margin-bottom:14px">
         <div class="row-between"><div style="max-width:780px"><h3>Prepare against a player</h3>
-          <div class="sub">Plays a player's openings at you.</div></div></div>
+          <div class="sub">Plays a player's openings at you, then plays on as their bot.</div></div></div>
         ${sourcePickerHtml('prepPicker', prep.pick, { button: 'Build tree' })}
         <div class="prep-opts">
           <button class="btn small-btn" id="prepMe">Use my games</button>
@@ -71,9 +74,10 @@ function renderPrepare(sec) {
           <label>Time control <select id="prepTc"></select></label>
           <label>Their moves <select id="prepMode"><option value="top">Most common</option><option value="weighted">Weighted by frequency</option></select></label>
           <label><input type="checkbox" id="prepHints"> Engine hints</label>
-          <label><input type="checkbox" id="prepFallback"> Engine plays when they're out of book</label>
+          <label>Out of their book <select id="prepFallback"><option value="bot">Their bot plays on</option><option value="engine">Stockfish plays on</option><option value="off">Stop</option></select></label>
         </div>
         <div class="muted small" id="prepStatus" style="margin-top:6px"></div>
+        <div class="muted small" id="prepBotStatus"></div>
       </div>
       <div class="rv prep">
         <div class="rv-board">
@@ -104,10 +108,10 @@ function renderPrepare(sec) {
     bindSourcePicker($('#prepPicker'), prep.pick, src => setPrepSource(src));
     $('#prepMe').onclick = () => setPrepSource(mySource(prep.pick));
     $('#prepColor').onchange = e => { prep.color = e.target.value; prep.line = []; prep.idx = 0; refreshPrepare(); maybeBotMove(); };
-    $('#prepTc').onchange = e => { prep.tc = e.target.value; rebuildTrees(); refreshPrepare(); maybeBotMove(); };
+    $('#prepTc').onchange = e => { prep.tc = e.target.value; rebuildTrees(); if (prep.fallback === 'bot') ensurePrepBot(); refreshPrepare(); maybeBotMove(); };
     $('#prepMode').onchange = e => prep.mode = e.target.value;
     $('#prepHints').onchange = e => { prep.hints = e.target.checked; refreshPrepare(); };
-    $('#prepFallback').onchange = e => { prep.fallback = e.target.checked; maybeBotMove(); };
+    $('#prepFallback').onchange = e => { prep.fallback = e.target.value; prep.botError = null; if (prep.fallback === 'bot' && prep.data) ensurePrepBot(); refreshPrepare(); maybeBotMove(); };
     $$('[data-pnav]').forEach(b => b.onclick = () => prepNav(b.dataset.pnav));
     $$('[data-pv]').forEach(b => b.onclick = () => { prep.sub = b.dataset.pv; refreshPrepare(); });
     prep.board = new BoardView($('#prepBoard'), { onMove: mv => prepPlay(mv.san) });
@@ -164,18 +168,75 @@ function maybeBotMove() {
   const tok = prep.token, at = prep.line.length; // drop the move if the source or position changed meanwhile
   const play = san => { if (tok === prep.token && prep.line.length === at && prep.idx === at) prepPlay(san); };
   if (m) { prep.botTimer = setTimeout(() => play(m.san), 450); return; }
-  // out of book: let the engine answer once its search for this position finishes
-  if (prep.fallback && prep.liveFen === c.fen() && prep.liveDone && prep.liveLines[0]) {
+  // out of book: their bot, or the engine once its search for this position finishes
+  if (prep.fallback === 'bot') { prepBotMove(play); return; }
+  if (prep.fallback === 'engine' && prep.liveFen === c.fen() && prep.liveDone && prep.liveLines[0]) {
     const mv = uciMove(c.fen(), prep.liveLines[0].best);
     if (mv) prep.botTimer = setTimeout(() => play(mv.san), 300);
   }
+}
+
+// ---------- their bot ----------
+// One bot at a time, for the loaded player and time control; the Your bot page's model is reused when it's the
+// same player. Built quickly (no held-out test), with their measured blunder rate for the blunder check.
+function ensurePrepBot() {
+  if (!prep.src) return Promise.resolve(null);
+  const key = sourceKey(prep.src) + '|' + prep.tc;
+  if (prep.botKey === key) return prep.botP;
+  if (prep.botModel && prep.botModel !== botv.model) prep.botModel.maia.terminate();
+  Object.assign(prep, { botKey: key, botModel: null, botStatus: 'Building their bot…', botError: null });
+  const reuse = botv.model && sourceKey(botv.model.src) === sourceKey(prep.src) && botv.model.tc === prep.tc ? botv.model : null;
+  prep.botP = (reuse ? Promise.resolve(reuse) : trainPlayerBot(prep.src, {
+    nGames: 80, tc: prep.tc, size: botModelSize(), evaluate: false,
+    onStatus: m => { if (prep.botKey === key) { prep.botStatus = m; drawPrepBot(); } },
+  })).then(model => {
+    if (prep.botKey !== key) { if (model !== botv.model) model.maia.terminate(); return null; }
+    Object.assign(prep, { botModel: model, botStatus: null });
+    drawPrepBot(); maybeBotMove();
+    return model;
+  }, e => {
+    if (prep.botKey !== key) return null;
+    // no bot (too few games, say): Stockfish plays on instead
+    Object.assign(prep, { botStatus: null, botError: e.message || String(e), fallback: 'engine' });
+    refreshPrepare(); maybeBotMove();
+    return null;
+  });
+  drawPrepBot();
+  return prep.botP;
+}
+
+function drawPrepBot() {
+  const el = $('#prepBotStatus');
+  if (!el) return;
+  const label = prep.data ? esc(prep.data.label) : 'Their';
+  el.innerHTML = prep.botError ? `No bot for them (${esc(prep.botError)}): Stockfish plays on.`
+    : prep.fallback !== 'bot' ? ''
+    : prep.botModel ? `${label}'s bot is ready: Maia-3 at about ${prep.botModel.playRating} (Lichess scale), blundering about as often as they do.`
+    : prep.botStatus || '';
+}
+
+// their bot's move for the current position (sampled like a human, or its likeliest move under "Most common")
+async function prepBotMove(play) {
+  const tok = prep.token, at = prep.line.length, job = tok + ':' + prep.line.join(' ');
+  if (prep.botJob === job) return;   // already choosing a move for this position
+  prep.botJob = job;
+  const model = await ensurePrepBot();
+  if (!model || tok !== prep.token || prep.line.length !== at || prep.idx !== at) return;
+  const c = new Chess(), fens = [c.fen()];
+  for (const s of prep.line) { c.move(s); fens.push(c.fen()); }
+  try {
+    const dist = await botDistribution(model, fens);
+    const pick = await botPick(model, dist, prep.mode === 'top' ? 'likely' : 'sample', fens.at(-1), getEnginePool()[0]);
+    if (pick) prep.botTimer = setTimeout(() => play(pick.san), 250);
+  } catch (e) { prep.botError = 'the bot failed to move: ' + (e.message || e); drawPrepBot(); }
+  finally { if (prep.botJob === job) prep.botJob = null; }
 }
 
 // ---------- engine ----------
 function startPrepEngine(c) {
   const fen = c.fen();
   const outOfBook = prep.trees && targetTurn(c) && !sortedMoves(prep.trees[prep.color].get(keyOf(fen))).length;
-  const need = !c.game_over() && (prep.hints || (prep.fallback && outOfBook));
+  const need = !c.game_over() && (prep.hints || (prep.fallback === 'engine' && outOfBook));
   if (!need) { prep.live?.stopAll(); return; }
   if (prep.liveFen === fen) return;
   if (!prep.live) prep.live = new LiveEngine(1);
@@ -217,7 +278,8 @@ function moveTable(moves, total, { clickable = true, bestTry = false } = {}) {
 function refreshPrepare() {
   if (!prep.built) return;
   $('#prepColor').value = prep.color; $('#prepMode').value = prep.mode;
-  $('#prepHints').checked = prep.hints; $('#prepFallback').checked = prep.fallback;
+  $('#prepHints').checked = prep.hints; $('#prepFallback').value = prep.fallback;
+  drawPrepBot();
   const tcs = prep.data ? [...new Set(prep.data.games.map(g => g.timeClass))] : [];
   $('#prepTc').innerHTML = `<option value="all">All</option>` + tcs.map(t => `<option value="${t}" ${prep.tc === t ? 'selected' : ''}>${t}</option>`).join('');
   $$('[data-pv]').forEach(b => b.classList.toggle('active', b.dataset.pv === prep.sub));
@@ -236,7 +298,7 @@ function refreshPrepare() {
   const label = prep.data ? prep.data.label : (prep.src ? sourceLabel(prep.src) : 'Opponent');
   prep.board.set({ fen, orientation: prep.flipped ? prep.color : userColor(), lastMove: last });
   const theirSide = prep.flipped ? 'bottom' : 'top';
-  $(theirSide === 'top' ? '#prepTop' : '#prepBottom').innerHTML = `<span class="pl"><span class="dot ${prep.color}"></span><b>${esc(label)}</b> <span class="muted">their repertoire</span></span>`;
+  $(theirSide === 'top' ? '#prepTop' : '#prepBottom').innerHTML = `<span class="pl"><span class="dot ${prep.color}"></span><b>${esc(label)}</b> <span class="muted">${prep.fallback === 'bot' ? 'their repertoire, then their bot' : 'their repertoire'}</span></span>`;
   $(theirSide === 'top' ? '#prepBottom' : '#prepTop').innerHTML = `<span class="pl"><span class="dot ${userColor()}"></span><b>You</b></span>`;
 
   // header: opening name + clickable line
@@ -268,7 +330,7 @@ function refreshPrepare() {
   else if (targetTurn(c)) {
     html += ms.length
       ? `<h3>What ${esc(label)} plays here</h3><div class="sub">${node.n} games reached this position · click a move to make them play it</div>${moveTable(ms, node.n)}`
-      : `<p class="out-of-book">Out of ${esc(label)}'s book — they never reached this position as ${prep.color}.${prep.fallback ? ' The engine plays for them from here.' : ' Turn on “Engine plays when they\'re out of book” to keep going.'}</p>`;
+      : `<p class="out-of-book">Out of ${esc(label)}'s book — they never reached this position as ${prep.color}. ${prep.fallback === 'bot' ? `Their bot plays for them from here${prep.botModel ? ` (about ${prep.botModel.playRating} on Lichess's scale)` : ''}.` : prep.fallback === 'engine' ? 'Stockfish plays for them from here.' : 'Choose who plays on under “Out of their book”.'}</p>`;
   } else {
     html += ms.length
       ? `<h3>What their opponents tried here</h3><div class="sub">${node.n} games · “their result” is ${esc(label)}'s score — low is good for you</div>${moveTable(ms, node.n, { bestTry: true })}`

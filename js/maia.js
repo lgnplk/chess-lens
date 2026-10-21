@@ -75,13 +75,18 @@ class Maia {
     this.worker.postMessage({ type: 'init', url: new URL(MAIA_MODELS[size], location.href).href });
   }
 
+  // One run at a time per worker: two overlapping runs on the GPU backend deadlock the session for good (a page
+  // asking for a move twice in quick succession froze the bot), so each run waits for the one before it.
   _run(history, eloSelf, eloOppo, n) {
     const id = this.nextId++;
-    return new Promise((resolve, reject) => {
+    const run = () => new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       this.worker.postMessage({ type: 'run', id, history: history.buffer, eloSelf: eloSelf.buffer, eloOppo: eloOppo.buffer, n },
         [history.buffer, eloSelf.buffer, eloOppo.buffer]);
     });
+    const p = (this.queue || Promise.resolve()).then(run, run);
+    this.queue = p.catch(() => {});
+    return p;
   }
 
   // items: [{ fens: [..., current FEN], eloSelf, eloOppo }] (Lichess-scale ratings).
