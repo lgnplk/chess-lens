@@ -164,6 +164,8 @@ async function learnAnswer(mv, fenAfter) {
     return learnAdvance();
   }
   // wrong for this line; another known line of the same opening is pointed out without counting it as a slip
+  learn.busy = true;
+  learn.board.set({ fen: fenAfter, orientation: learn.color, lastMove: { from: mv.from, to: mv.to } });
   const book = await getBook(), hit = book && bookHit(book, fenAfter);
   const sibling = hit && (hit.name === learn.name || hit.name.startsWith(learn.name + ':') || hit.name.startsWith(learn.name + ','));
   if (!sibling) learn.slips++;

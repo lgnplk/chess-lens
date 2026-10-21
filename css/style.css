@@ -698,7 +698,7 @@ td.wrap { white-space: normal; }
 /* ---------- board motion ---------- */
 .sq.moving { z-index: 5; }               /* a sliding piece passes over its neighbours */
 .sq img.fading { z-index: 1; }           /* a captured piece fades under its captor */
-.board .ghost { scale: 1.12; filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .35)); cursor: grabbing; }
+.board .ghost { filter: drop-shadow(0 6px 8px rgba(0, 0, 0, .35)); will-change: transform; } /* lift: in its transform, after the move */
 .board.fresh .sq.hl::after { animation: hl-in .18s ease-out; }
 @keyframes hl-in { from { opacity: 0; } }
 .board.fresh .sq .check { animation: check-in .25s ease-out; }
@@ -790,3 +790,14 @@ canvas.chart-in { animation: chart-in .16s ease-out; }
 .learn-moves { font-variant-numeric: tabular-nums; line-height: 1.9; margin: 10px 0; padding: 10px 12px; background: var(--surface-2); border-radius: 4px; }
 .learn-mine { font-weight: 700; }
 .learn-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
+/* moving pieces: grab cursor on pieces you can move, the target square outlined while dragging, no scrolling
+   or text selection mid-drag, and the promotion choice */
+.board.interactive { touch-action: none; user-select: none; -webkit-user-select: none; }
+.board.interactive .sq.mov { cursor: grab; }
+.board.dragging, .board.dragging .sq { cursor: grabbing; }
+.sq.over::before { content: ""; position: absolute; inset: 0; z-index: 3; box-shadow: inset 0 0 0 4px rgba(255, 255, 255, .65); }
+.board .promo { position: absolute; inset: 0; z-index: 20; background: rgba(0, 0, 0, .45); }
+.board .promo button { position: absolute; padding: 0; border: none; border-radius: 50%; background: radial-gradient(#fff 50%, #c9c3b8); box-shadow: 0 2px 8px rgba(0, 0, 0, .5); cursor: pointer; transition: transform .1s ease-out, border-radius .1s ease-out; }
+.board .promo button:hover { border-radius: 4px; transform: scale(1.04); background: #fff; }
+.board .promo img { width: 100%; height: 100%; pointer-events: none; }

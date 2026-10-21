@@ -1,5 +1,5 @@
-// Board view: squares, pieces, last-move highlight, arrows, move-quality badge,
-// and click/drag move input with legal-move dots.
+// Board view: squares, pieces, last-move highlight, arrows, move-quality badge, click/drag move input with
+// legal-move dots, a promotion choice, and the user's own right-click arrows and circles.
 const PIECE_IMG = 'https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/piece/cburnett/';
 const FILES = 'abcdefgh';
 
@@ -10,16 +10,20 @@ class BoardView {
     this.state = { fen: new Chess().fen(), orientation: 'white', arrows: [] };
     this.selected = null; this.dests = [];
     this.drag = null;
+    this.drawn = { arrows: [], circles: [] };   // the user's own right-click arrows and circles
+    el.classList.toggle('interactive', !!onMove);
     el.addEventListener('pointerdown', e => this.down(e));
     el.addEventListener('pointermove', e => this.move(e));
     el.addEventListener('pointerup', e => this.up(e));
-    el.addEventListener('pointercancel', () => this.cancelDrag());
+    el.addEventListener('pointercancel', () => { this.cancelDrag(); this.render(); });
     el.addEventListener('contextmenu', e => e.preventDefault());
   }
 
   set(state) {
+    if (state.fen !== this.state.fen) this.drawn = { arrows: [], circles: [] }; // drawings belong to a position
     this.state = Object.assign({ arrows: [] }, state);
     this.selected = null; this.dests = [];
+    this.promo?.remove(); this.promo = null;
     this.render();
   }
 
@@ -34,76 +38,147 @@ class BoardView {
     return FILES[flip ? 7 - c : c] + (flip ? row + 1 : 8 - row);
   }
 
+  // the top-left corner of a square, in px from the board's corner
+  squareXY(sq) {
+    const s = this.el.clientWidth / 8, [x, y] = sqXY(sq, this.state.orientation === 'black');
+    return [(x - 0.5) * s, (y - 0.5) * s];
+  }
+
   pieceAt(sq) { return new Chess(this.state.fen).get(sq); }
 
   select(sq) {
     this.selected = sq;
-    this.dests = new Chess(this.state.fen).moves({ square: sq, verbose: true }).map(m => ({ to: m.to, capture: !!m.captured }));
+    this.dests = new Chess(this.state.fen).moves({ square: sq, verbose: true }).map(m => ({ to: m.to, capture: !!m.captured, promo: !!m.promotion }));
     this.render();
   }
 
-  tryMove(from, to) {
-    if (!this.dests.some(d => d.to === to)) return false;
+  tryMove(from, to, promotion) {
+    const d = this.dests.find(x => x.to === to);
+    if (!d) return false;
+    // a pawn reaching the last rank: choose the piece, as on lichess (dropping it there doesn't move it yet)
+    if (d.promo && !promotion) { this.askPromotion(from, to); return true; }
     const c = new Chess(this.state.fen);
-    const mv = c.move({ from, to, promotion: 'q' });
+    const mv = c.move({ from, to, promotion: promotion || 'q' });
     if (!mv) return false;
     this.selected = null; this.dests = [];
+    const before = this.state.fen;
     this.onMove?.(mv, c.fen());
+    // a page that doesn't take the move (not its turn, a puzzle already solved): the piece goes back home
+    queueMicrotask(() => { if (this.state.fen === before && !this.promo) { this.dropped = null; this.render(); } });
     return true;
   }
 
+  // Lichess-style input: press on a piece picks it up (centred on the pointer, slightly lifted); drop on a legal
+  // square to move, anywhere else and it glides back; or click the piece, then the square. Clicking a selected
+  // piece again lets it go. Right-drag draws an arrow, right-click a circle (shift: red); any left click clears them.
   down(e) {
+    if (e.button === 2) { this.drawFrom = this.squareAt(e); return; }
     if (e.button !== 0) return;
+    if (this.drawn.arrows.length || this.drawn.circles.length) { this.drawn = { arrows: [], circles: [] }; this.render(); }
     const sq = this.squareAt(e);
-    if (!sq) return;
-    if (this.selected && this.tryMove(this.selected, sq)) return;
-    const p = this.pieceAt(sq);
-    const turn = this.state.fen.split(' ')[1];
-    if (p && p.color === turn) {
-      this.select(sq);
-      const img = this.el.querySelector(`[data-sq="${sq}"] img`);
-      if (img) {
-        const r = this.el.getBoundingClientRect();
-        const ghost = img.cloneNode();
-        ghost.className = 'ghost';
-        ghost.style.width = ghost.style.height = (r.width / 8) + 'px';
-        this.el.appendChild(ghost);
-        img.style.opacity = '0.3';
-        this.drag = { from: sq, ghost, moved: false, x: e.clientX, y: e.clientY };
-        this.positionGhost(e);
-        this.el.setPointerCapture(e.pointerId);
-      }
-    } else if (this.selected) { this.selected = null; this.dests = []; this.render(); }
+    if (!sq || !this.onMove || this.promo) return;
+    if (this.selected && this.selected !== sq && this.tryMove(this.selected, sq)) return;
+    const p = this.pieceAt(sq), turn = this.state.fen.split(' ')[1];
+    if (!(p && p.color === turn)) { if (this.selected) { this.selected = null; this.dests = []; this.render(); } return; }
+    const wasSelected = this.selected === sq;
+    if (!wasSelected) this.select(sq);
+    const img = this.el.querySelector(`[data-sq="${sq}"] img`);
+    if (!img) return;
+    const ghost = img.cloneNode();
+    ghost.className = 'ghost';
+    ghost.style.width = ghost.style.height = (this.el.clientWidth / 8) + 'px';
+    this.el.appendChild(ghost);
+    this.drag = { from: sq, ghost, moved: false, wasSelected, x: e.clientX, y: e.clientY, over: sq };
+    this.positionGhost(e);
+    this.el.classList.add('dragging');
+    this.el.setPointerCapture(e.pointerId);
+    this.render();
   }
 
   positionGhost(e) {
-    const r = this.el.getBoundingClientRect(), s = r.width / 8;
-    this.drag.ghost.style.transform = `translate(${e.clientX - r.left - s / 2}px, ${e.clientY - r.top - s / 2}px)`;
+    const r = this.el.getBoundingClientRect(), s = this.el.clientWidth / 8;
+    // the lift is part of the same transform, after the move, so the piece stays centred under the pointer
+    // (the board's own border, if any, is left out of the offset)
+    const x = e.clientX - r.left - this.el.clientLeft - s / 2, y = e.clientY - r.top - this.el.clientTop - s / 2;
+    this.drag.gx = x; this.drag.gy = y;
+    this.drag.ghost.style.transform = `translate(${x}px, ${y}px) scale(1.12)`;
   }
 
   move(e) {
     if (!this.drag) return;
-    if (Math.hypot(e.clientX - this.drag.x, e.clientY - this.drag.y) > 4) this.drag.moved = true;
+    if (Math.hypot(e.clientX - this.drag.x, e.clientY - this.drag.y) > 3) this.drag.moved = true;
     this.positionGhost(e);
+    // the square under the pointer is outlined while dragging
+    const over = this.squareAt(e);
+    if (over !== this.drag.over) {
+      this.el.querySelector('.sq.over')?.classList.remove('over');
+      if (over && this.dests.some(d => d.to === over)) this.el.querySelector(`[data-sq="${over}"]`)?.classList.add('over');
+      this.drag.over = over;
+    }
   }
 
   up(e) {
+    if (e.button === 2) {
+      const from = this.drawFrom, to = this.squareAt(e);
+      this.drawFrom = null;
+      if (from && to) {
+        const color = e.shiftKey ? 'rgba(200, 40, 40, .8)' : 'rgba(21, 120, 27, .8)';
+        const list = from === to ? this.drawn.circles : this.drawn.arrows;
+        const i = list.findIndex(x => x.from === from && x.to === to);
+        if (i >= 0) list.splice(i, 1); else list.push({ from, to, color, width: 0.18, opacity: 1 });
+        this.render();
+      }
+      return;
+    }
     if (!this.drag) return;
-    const { from, moved } = this.drag;
+    const { from, moved, wasSelected, gx, gy, ghost } = this.drag;
     const to = this.squareAt(e);
-    this.cancelDrag();
-    if (moved && to && to !== from) {
+    if (moved && to && to !== from && this.dests.some(d => d.to === to)) {
+      this.cancelDrag();
       this.dropped = { from, to }; // already where the hand put it: no slide
       if (this.tryMove(from, to)) return;
       this.dropped = null;
+      return this.render();
     }
-    this.render(); // keep selection (click-to-move) and restore the piece
+    if (moved) {
+      // dropped off the board or on an illegal square: the piece glides home
+      this.drag = null;
+      this.el.classList.remove('dragging');
+      const [hx, hy] = this.squareXY(from);
+      const home = ghost.animate([{ transform: `translate(${gx}px, ${gy}px) scale(1.12)` }, { transform: `translate(${hx}px, ${hy}px) scale(1)` }], { duration: 140, easing: 'ease-out', fill: 'forwards' });
+      home.finished.then(() => { ghost.remove(); this.selected = null; this.dests = []; this.render(); }).catch(() => ghost.remove());
+      return;
+    }
+    // a click: a second click on the selected piece lets it go; otherwise it stays selected for click-to-move
+    this.cancelDrag();
+    if (wasSelected) { this.selected = null; this.dests = []; }
+    this.render();
   }
 
   cancelDrag() {
     if (!this.drag) return;
     this.drag.ghost.remove();
     this.drag = null;
+    this.el.classList.remove('dragging');
+  }
+
+  // the promotion choice: four pieces over the promotion square, toward the middle of the board; click
+  // elsewhere to take the move back
+  askPromotion(from, to) {
+    const color = this.state.fen.split(' ')[1], s = 100 / 8, flip = this.state.orientation === 'black';
+    const [cx, cy] = sqXY(to, flip), down = cy < 4;
+    const box = document.createElement('div');
+    box.className = 'promo';
+    box.innerHTML = ['q', 'n', 'r', 'b'].map((p, i) => `<button data-p="${p}" style="left:${(cx - 0.5) * s}%;top:${(cy - 0.5 + (down ? i : -i)) * s}%;width:${s}%;height:${s}%"><img src="${pieceSrc(color === 'w' ? p.toUpperCase() : p)}" alt="${p}" draggable="false"></button>`).join('');
+    box.addEventListener('pointerdown', e => {
+      e.stopPropagation();
+      const b = e.target.closest('[data-p]');
+      box.remove(); this.promo = null;
+      if (b) this.tryMove(from, to, b.dataset.p);
+      else { this.selected = null; this.dests = []; this.render(); }
+    });
+    this.promo = box;
+    this.el.appendChild(box);
   }
 
   render() {
@@ -145,13 +220,22 @@ class BoardView {
         if (dests.has(sq)) inner += `<span class="${dests.get(sq) ? 'cap' : 'dot'}"></span>`;
         if (badge && badge.sq === sq) inner += `<span class="badge cls-${badge.cls}" title="${CLS[badge.cls]?.label || ''}">${badge.text}</span>`;
         const cls = ['sq', light ? 'l' : 'd'];
+        if (p && this.onMove && (p === p.toUpperCase() ? 'w' : 'b') === fen.split(' ')[1]) cls.push('mov');
         if (hl.has(sq)) cls.push('hl');
         if (sq === this.selected) cls.push('sel');
         html += `<div class="${cls.join(' ')}" data-sq="${sq}">${inner}</div>`;
       }
     }
-    html += arrowsSvg(arrows || [], flip);
+    html += arrowsSvg([...(arrows || []), ...this.drawn.arrows], flip, this.drawn.circles);
     this.el.innerHTML = html;
+    // a redraw mid-drag keeps the lifted piece, its faded twin at home and the outlined target; and a pending promotion choice
+    if (this.drag) {
+      this.el.appendChild(this.drag.ghost);
+      const home = this.el.querySelector(`[data-sq="${this.drag.from}"] img`);
+      if (home) home.style.opacity = '0.3';
+      if (this.dests.some(d => d.to === this.drag.over)) this.el.querySelector(`[data-sq="${this.drag.over}"]`)?.classList.add('over');
+    }
+    if (this.promo) this.el.appendChild(this.promo);
     const prev = this.shown, placement = fen.split(' ')[0], now = performance.now();
     this.shown = { placement, flip, grid };
     const moved = !!prev && prev.flip === flip && prev.placement !== placement;
@@ -257,8 +341,8 @@ function sqXY(sq, flip) {
   return [(flip ? 7 - c : c) + 0.5, (flip ? 7 - r : r) + 0.5];
 }
 
-function arrowsSvg(arrows, flip) {
-  if (!arrows.length) return '';
+function arrowsSvg(arrows, flip, circles = []) {
+  if (!arrows.length && !circles.length) return '';
   let s = `<svg class="arrows" viewBox="0 0 8 8"><defs>`;
   arrows.forEach((a, i) => {
     s += `<marker id="ah${i}" markerWidth="3" markerHeight="3" refX="1.6" refY="1.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L3,1.5 L0,3 z" fill="${a.color}"/></marker>`;
@@ -270,6 +354,7 @@ function arrowsSvg(arrows, flip) {
     const ex = x2 - dx / len * 0.42, ey = y2 - dy / len * 0.42;
     s += `<line x1="${x1}" y1="${y1}" x2="${ex}" y2="${ey}" stroke="${a.color}" stroke-width="${a.width ?? 0.2}" stroke-linecap="round" opacity="${a.opacity ?? 0.85}" marker-end="url(#ah${i})"/>`;
   });
+  circles.forEach(c => { const [x, y] = sqXY(c.from, flip); s += `<circle cx="${x}" cy="${y}" r="0.44" fill="none" stroke="${c.color}" stroke-width="0.07"/>`; });
   return s + '</svg>';
 }
 
