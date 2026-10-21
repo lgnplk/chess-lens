@@ -48,7 +48,7 @@ function fidCandidates(moves, extraUci = null) {
 
 // Stockfish win-% (side to move) of the best move and of each candidate, cached per position
 async function scoreCandidates(engine, fen, ucis, depth = FID_DEPTH) {
-  const key = `cl:fid:v1:d${depth}:${fen}`;
+  const key = `cl:fid:v1:${engine.tag || ''}d${depth}:${fen}`;
   const hit = (await evalDB.get(key)) || { b: null, m: {} };
   const sign = fen.split(' ')[1] === 'w' ? 1 : -1;
   const wp = l => winPct(clamp(evalToCp(l) * sign, -1500, 1500));

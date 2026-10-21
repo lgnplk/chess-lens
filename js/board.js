@@ -23,6 +23,9 @@ class BoardView {
     this.render();
   }
 
+  // show an unrelated position at once (a new puzzle, a new game): no slides, no sound
+  jump(state) { this.shown = null; this.anims = null; this.set(state); }
+
   squareAt(e) {
     const r = this.el.getBoundingClientRect();
     const c = Math.floor((e.clientX - r.left) / r.width * 8), row = Math.floor((e.clientY - r.top) / r.height * 8);
@@ -153,7 +156,10 @@ class BoardView {
     this.shown = { placement, flip, grid };
     const moved = !!prev && prev.flip === flip && prev.placement !== placement;
     this.el.classList.toggle('fresh', moved); // highlight/check fade in only when the position changed, not on every redraw
-    if (moved) this.anims = this.planAnims(prev.grid, grid, flip, now);
+    if (moved) {
+      this.anims = this.planAnims(prev.grid, grid, flip, now);
+      if (this.anims?.length) Sound.play(this.anims.some(a => a.kind === 'out') ? 'capture' : 'move');
+    }
     else if (prev && prev.flip !== flip) this.anims = null;
     // a redraw mid-animation (live engine lines, a click) picks each animation up where it was
     this.anims = this.anims?.filter(a => now < a.t0 + a.dur);
@@ -208,6 +214,42 @@ class BoardView {
 }
 
 const BOARD_ANIM_MS = 200;
+
+// Board sounds, synthesised (no audio files): a short wooden tap for a move, a heavier double tap for a capture,
+// and two notes for a drill verdict. The header's speaker button turns them off (remembered).
+const Sound = (() => {
+  let ctx = null;
+  const on = () => store.get('cl:sound') !== 'off';
+  const tap = (c, t, freq, gain) => {
+    const n = Math.floor(c.sampleRate * 0.07), buf = c.createBuffer(1, n, c.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n) ** 5;
+    const src = c.createBufferSource(), bp = c.createBiquadFilter(), g = c.createGain();
+    src.buffer = buf; bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 1.4; g.gain.value = gain;
+    src.connect(bp).connect(g).connect(c.destination); src.start(t);
+  };
+  const tone = (c, t, freq, dur, gain) => {
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(gain, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(c.destination); o.start(t); o.stop(t + dur + 0.02);
+  };
+  return {
+    on,
+    toggle() { store.set('cl:sound', on() ? 'off' : 'on'); return on(); },
+    play(kind) {
+      if (!on()) return;
+      try {
+        const c = ctx ||= new (window.AudioContext || window.webkitAudioContext)();
+        if (c.state === 'suspended') c.resume();
+        const t = c.currentTime + 0.005;
+        if (kind === 'move') tap(c, t, 1500, 0.9);
+        else if (kind === 'capture') { tap(c, t, 1000, 1.2); tap(c, t + 0.035, 1300, 0.7); }
+        else if (kind === 'good') { tone(c, t, 660, 0.14, 0.12); tone(c, t + 0.1, 990, 0.22, 0.12); }
+        else if (kind === 'bad') { tone(c, t, 330, 0.16, 0.12); tone(c, t + 0.12, 247, 0.26, 0.12); }
+      } catch { /* no audio */ }
+    },
+  };
+})();
 const pieceSrc = p => `${PIECE_IMG}${p === p.toUpperCase() ? 'w' : 'b'}${p.toUpperCase()}.svg`;
 
 function sqXY(sq, flip) {

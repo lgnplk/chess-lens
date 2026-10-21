@@ -196,7 +196,7 @@ function computeAnalytics(games) {
 // ---------- Engine scan aggregation ----------
 function aggregateScan(results) {
   // results: [{ game, analysis }]
-  const myMoves = [];
+  const myMoves = [], oppMoves = [];
   const perGame = [];
   const recsMe = [], recsOpp = [], brilliantMoves = [];
   // only-move and brilliance chances in one game ([found, chances]), counted as the ladder counts them (tools/build-ladder.js)
@@ -213,6 +213,7 @@ function aggregateScan(results) {
     const c = game.color === 'white' ? 'w' : 'b';
     const ms = analysis.moves.filter(m => m.color === c);
     myMoves.push(...ms.map(m => ({ ...m, game })));
+    oppMoves.push(...analysis.moves.filter(m => m.color !== c));
     // eval swings from my POV
     const sign = c === 'w' ? 1 : -1;
     const evs = analysis.evals.map(e => evalToCp(e) * sign);
@@ -228,6 +229,13 @@ function aggregateScan(results) {
       ...chances('my', mine), ...chances('opp', theirs),
     });
   }
+  // each phase against your opponents in the same phase of the same games: decided endgames are easy for both
+  // sides, so a raw "most accurate in the endgame" mostly measures the position; the difference doesn't
+  const phaseVs = ['opening', 'middlegame', 'endgame'].map(p => {
+    const accs = list => list.filter(m => m.phase === p && m.acc != null && m.cls !== 'book' && m.cls !== 'forced').map(m => m.acc);
+    const a = accs(myMoves), b = accs(oppMoves), v = xs => { const mu = mean(xs); return mean(xs.map(x => (x - mu) ** 2)); };
+    return { phase: p, nMe: a.length, nOpp: b.length, d: a.length && b.length ? mean(a) - mean(b) : null, se2: a.length > 1 && b.length > 1 ? v(a) / a.length + v(b) / b.length : null };
+  });
   const phaseStats = ['opening', 'middlegame', 'endgame'].map(p => {
     const ms = myMoves.filter(m => m.phase === p);
     return {
@@ -254,7 +262,7 @@ function aggregateScan(results) {
   // how the quick brilliant rule held up under the deeper check (both players' moves)
   const brilliantCheck = results.reduce((t, { analysis: a }) => ({ candidates: t.candidates + (a.brilliantCheck?.candidates || 0), confirmed: t.confirmed + (a.brilliantCheck?.confirmed || 0) }), { candidates: 0, confirmed: 0 });
   return {
-    n: perGame.length, nMoves: myMoves.length, myMoves, perGame, phaseStats, pressure, blunderPieces, movesPerPiece, totals, brilliantCheck,
+    n: perGame.length, nMoves: myMoves.length, myMoves, perGame, phaseStats, phaseVs, pressure, blunderPieces, movesPerPiece, totals, brilliantCheck,
     acc: mean(perGame.map(p => p.acc)), oppAcc: mean(perGame.map(p => p.oppAcc)), acpl: mean(perGame.map(p => p.acpl)),
     conversion: { n: winning.length, score: winning.length ? mean(winning.map(p => scoreOf(p.game))) : null },
     defense: { n: losing.length, score: losing.length ? mean(losing.map(p => scoreOf(p.game))) : null },
@@ -269,6 +277,15 @@ function computeReport(games, scan) {
   const F = [];
   const add = (type, title, evidence, tip, weight = 1) => F.push({ type, title, evidence, tip, weight });
   if (games.length < 10) return [];
+  // A claim needs evidence, not just a gap: each strength or weakness must clear a 95% test (|z| ≥ 1.96) against
+  // its sampling error. A game's score varies by about ±0.48; a single move's accuracy by about ±25.
+  const sigMean = (d, n) => n > 0 && Math.abs(d) >= 1.96 * 0.48 / Math.sqrt(n);
+  const sigDiff = (d, n1, n2) => n1 > 0 && n2 > 0 && Math.abs(d) >= 1.96 * 0.48 * Math.sqrt(1 / n1 + 1 / n2);
+  const sigRate = (p1, n1, p2, n2) => {
+    if (!(n1 > 0 && n2 > 0) || p1 == null || p2 == null) return false;
+    const p = (p1 * n1 + p2 * n2) / (n1 + n2), se = Math.sqrt(p * (1 - p) * (1 / n1 + 1 / n2));
+    return se > 0 && Math.abs(p1 - p2) >= 1.96 * se;
+  };
   const ov = computeOverview(games);
   const an = computeAnalytics(games);
   const hb = computeHabits(games);
@@ -277,12 +294,12 @@ function computeReport(games, scan) {
   const { white: W, black: B } = ov.byColor;
   if (W.n >= 8 && B.n >= 8) {
     const d = W.score - B.score;
-    if (Math.abs(d) >= 0.08) {
+    if (Math.abs(d) >= 0.08 && sigDiff(d, W.n, B.n)) {
       const better = d > 0 ? 'White' : 'Black', worse = d > 0 ? 'Black' : 'White';
       add('weakness', `Your ${worse} results lag behind ${better}`,
         `You score ${pct(d > 0 ? B.score : W.score)} with ${worse} vs ${pct(d > 0 ? W.score : B.score)} with ${better} (${W.n}/${B.n} games).`,
         `Review your ${worse.toLowerCase()} repertoire in the Openings tab — pick one reliable system and study its typical plans.`, Math.abs(d) * 10);
-    } else add('note', 'Balanced results with both colors', `White ${pct(W.score)} vs Black ${pct(B.score)}.`, '', 0.2);
+    }
   }
 
   // Openings
@@ -290,14 +307,14 @@ function computeReport(games, scan) {
   const allScore = ov.all.score;
   for (const o of ops) {
     const delta = o.over;
-    if (delta >= 0.08) add('strength', `Strong results in the ${o.name} as ${colorName(o.color)}`, `${o.n} games · ${pct(o.score)} · +${pct(delta)} vs expected`, 'Steer toward it.', delta * 8 + Math.log(o.n) / 4);
-    else if (delta <= -0.08) add('weakness', `Struggling in the ${o.name} as ${colorName(o.color)}`, `${o.n} games · ${pct(o.score)} · −${pct(-delta)} vs expected`, 'Study model games or replace it.', -delta * 8 + Math.log(o.n) / 4);
+    if (delta >= 0.08 && sigMean(delta, o.n)) add('strength', `Strong results in the ${o.name} as ${colorName(o.color)}`, `${o.n} games · ${pct(o.score)} · +${pct(delta)} vs expected`, 'Steer toward it.', delta * 8 + Math.log(o.n) / 4);
+    else if (delta <= -0.08 && sigMean(delta, o.n)) add('weakness', `Struggling in the ${o.name} as ${colorName(o.color)}`, `${o.n} games · ${pct(o.score)} · −${pct(-delta)} vs expected`, 'Study model games or replace it.', -delta * 8 + Math.log(o.n) / 4);
   }
 
   // Time classes
   if (ov.byTime.length > 1) {
     const tcs = ov.byTime.filter(t => t.n >= 10).sort((a, b) => b.over - a.over);
-    if (tcs.length > 1 && tcs[0].over - tcs.at(-1).over > 0.08) {
+    if (tcs.length > 1 && tcs[0].over - tcs.at(-1).over > 0.08 && sigDiff(tcs[0].over - tcs.at(-1).over, tcs[0].n, tcs.at(-1).n)) {
       add('note', `You perform best at ${tcs[0].tc}`, `vs expected: ${tcs.map(t => `${t.tc} ${t.over >= 0 ? '+' : ''}${pct(t.over)}`).join(' · ')}`, '', 0.6);
     }
   }
@@ -307,18 +324,18 @@ function computeReport(games, scan) {
     const losses = games.filter(g => g.result === 'loss');
     const onTime = losses.filter(g => g.reason === 'timeout').length / Math.max(1, losses.length);
     if (onTime >= 0.25) add('weakness', 'Too many losses on time', `${pct(onTime)} of losses${an.material.lostOnTimeAhead ? ` · ${an.material.lostOnTimeAhead} while ahead` : ''}`, 'Budget your clock: aim to have at least 50% of your time left at move 20, and pre-move recaptures in simple positions.', onTime * 6);
-    if (an.timeTrouble.rate >= 0.3 && an.timeTrouble.n >= 5 && an.timeTrouble.score < an.timeTrouble.noTrouble.score - 0.08)
+    if (an.timeTrouble.rate >= 0.3 && an.timeTrouble.n >= 5 && an.timeTrouble.score < an.timeTrouble.noTrouble.score - 0.08 && sigDiff(an.timeTrouble.score - an.timeTrouble.noTrouble.score, an.timeTrouble.n, an.timeTrouble.noTrouble.n))
       add('weakness', 'Time trouble costs you points', `${pct(an.timeTrouble.rate)} of games · score ${pct(an.timeTrouble.score)} vs ${pct(an.timeTrouble.noTrouble.score)}`, 'Play the opening faster — you likely know it — and save time for critical middlegame moments.', 3);
     if (an.timeTrouble.rate < 0.12) add('strength', 'Good clock management', `Time trouble in ${pct(an.timeTrouble.rate)} of games`, '', 1);
   }
 
   // Material conversion / comeback
   const m = an.material;
-  if (m.ahead.n >= 8) {
-    if (m.ahead.score >= 0.88) add('strength', 'Clinical conversion', `${pct(m.ahead.score)} when 3+ up · ${m.ahead.n} games`, '', 2);
+  if (m.ahead.n >= 8 && !scan) {
+    if (m.ahead.score >= 0.88) add('strength', 'Clinical when ahead on material', `${pct(m.ahead.score)} when 3+ up · ${m.ahead.n} games`, '', 2);
     else if (m.ahead.score < 0.78) add('weakness', 'Letting winning positions slip', `${pct(m.ahead.score)} when 3+ up · ${m.ahead.n} games`, 'When ahead: trade pieces, kill counterplay.', (0.88 - m.ahead.score) * 10);
   }
-  if (m.behind.n >= 8) {
+  if (m.behind.n >= 8 && !scan) {
     if (m.behind.score >= 0.3) add('strength', 'Resourceful defender', `${pct(m.behind.score)} when 3+ down · ${m.behind.n} games`, '', 1.5);
     else if (m.behind.score <= 0.1) add('note', 'Few comebacks when behind', `${pct(m.behind.score)} when 3+ down · ${m.behind.n} games`, 'When behind, complicate.', 0.8);
   }
@@ -327,15 +344,15 @@ function computeReport(games, scan) {
   const aL = an.afterRes.find(r => r.label === 'After a loss'), aW = an.afterRes.find(r => r.label === 'After a win');
   if (aL.n >= 10 && aW.n >= 10) {
     const d = aW.over - aL.over;
-    if (d >= 0.08) add('weakness', 'Tilt after losses', `${pct(aL.score)} after a loss · ${pct(aW.score)} after a win`, 'Break after a loss.', d * 10);
-    else if (d <= -0.03) add('strength', 'Bounce back well after losses', `${pct(aL.score)} after a loss`, '', 0.8);
+    if (d >= 0.08 && sigDiff(d, aW.n, aL.n)) add('weakness', 'Tilt after losses', `${pct(aL.score)} after a loss · ${pct(aW.score)} after a win`, 'Break after a loss.', d * 10);
+    else if (d <= -0.03 && sigDiff(d, aW.n, aL.n)) add('strength', 'Bounce back well after losses', `${pct(aL.score)} after a loss`, '', 0.8);
   }
-  if (an.afterTwoLosses.n >= 8 && an.afterTwoLosses.over <= -0.08)
+  if (an.afterTwoLosses.n >= 8 && an.afterTwoLosses.over <= -0.08 && sigMean(an.afterTwoLosses.over, an.afterTwoLosses.n))
     add('weakness', 'Losing streaks snowball', `${pct(an.afterTwoLosses.score)} after two losses`, 'Stop after two losses in a row.', 2);
   const longS = an.sessionBuckets.filter(s => s.n >= 10);
   if (longS.length >= 2) {
     const first = longS[0], last = longS.at(-1);
-    if (first.over - last.over >= 0.08) add('weakness', 'Performance fades in long sessions', `Game ${first.label}: ${pct(first.score)} · game ${last.label}: ${pct(last.score)}`, 'Shorter sessions.', 1.5);
+    if (first.over - last.over >= 0.08 && sigDiff(first.over - last.over, first.n, last.n)) add('weakness', 'Performance fades in long sessions', `Game ${first.label}: ${pct(first.score)} · game ${last.label}: ${pct(last.score)}`, 'Shorter sessions.', 1.5);
   }
 
   // Opponent strength
@@ -343,12 +360,12 @@ function computeReport(games, scan) {
   const upG = games.filter(g => g.diff <= -100);
   if (upG.length >= 10) {
     const o = overPerf(upG);
-    if (o >= 0.05) add('strength', 'Giant killer', `${pct(wdl(upG).score)} vs 100+ higher · +${pct(o)} vs expected`, '', 1.5);
+    if (o >= 0.05 && sigMean(o, upG.length)) add('strength', 'Giant killer', `${pct(wdl(upG).score)} vs 100+ higher · +${pct(o)} vs expected`, '', 1.5);
   }
   const downG = games.filter(g => g.diff >= 100);
   if (downG.length >= 10) {
     const o = overPerf(downG);
-    if (o <= -0.05) add('weakness', 'Dropping points to lower-rated players', `${pct(wdl(downG).score)} vs 100+ lower · −${pct(-o)} vs expected`, 'Play solid; let them err.', 1.5);
+    if (o <= -0.05 && sigMean(o, downG.length)) add('weakness', 'Dropping points to lower-rated players', `${pct(wdl(downG).score)} vs 100+ lower · −${pct(-o)} vs expected`, 'Play solid; let them err.', 1.5);
   }
 
   // Game length -> endgame skill proxy
@@ -356,55 +373,56 @@ function computeReport(games, scan) {
   const longG = games.filter(g => g.moves >= 50);
   if (longG.length >= 10) {
     const o = overPerf(longG);
-    if (o >= 0.06) add('strength', 'Strong in long games', `${pct(wdl(longG).score)} in 50+ move games · +${pct(o)}`, '', 1.2);
-    else if (o <= -0.06) add('weakness', 'Long games go badly', `${pct(wdl(longG).score)} in 50+ move games · −${pct(-o)}`, 'Practice rook endgames.', 1.2);
+    if (o >= 0.06 && sigMean(o, longG.length)) add('strength', 'Strong in long games', `${pct(wdl(longG).score)} in 50+ move games · +${pct(o)}`, '', 1.2);
+    else if (o <= -0.06 && sigMean(o, longG.length)) add('weakness', 'Long games go badly', `${pct(wdl(longG).score)} in 50+ move games · −${pct(-o)}`, 'Practice rook endgames.', 1.2);
   }
-  const shortL = games.filter(g => g.moves <= 25 && g.result === 'loss');
-  if (shortL.length / Math.max(1, games.filter(g => g.result === 'loss').length) >= 0.35)
-    add('weakness', 'Quick losses', `${pct(shortL.length / games.filter(g => g.result === 'loss').length)} of losses within 25 moves`, 'Develop, castle, check their threats.', 2);
+  const lossG = games.filter(g => g.result === 'loss'), winG = games.filter(g => g.result === 'win');
+  const qL = lossG.filter(g => g.moves <= 25).length / Math.max(1, lossG.length), qW = winG.filter(g => g.moves <= 25).length / Math.max(1, winG.length);
+  if (lossG.length >= 10 && winG.length >= 10 && qL >= 0.35 && qL > qW && sigRate(qL, lossG.length, qW, winG.length))
+    add('weakness', 'Quick losses', `${pct(qL)} of your losses end within 25 moves · ${pct(qW)} of your wins`, 'Develop, castle, check their threats.', 2);
 
   // Playstyle
   if (hb) {
     const castle = hb.rows.find(r => r.label === 'Castled by move 10'), q = hb.rows.find(r => r.label === 'Queen moved in first 6 moves');
-    if (castle.me < castle.opp - 15) add('weakness', 'King often left in the center', `Castled by move 10: ${num(castle.me, 0)}% · opponents ${num(castle.opp, 0)}%`, 'Castle early.', 1.2);
-    if (q.me > 30 && q.me > q.opp + 10) add('note', 'Frequent early queen moves', `${num(q.me, 0)}% of games · opponents ${num(q.opp, 0)}%`, '', 0.5);
+    if (castle.me < castle.opp - 15 && sigRate(castle.me / 100, hb.n, castle.opp / 100, hb.n)) add('weakness', 'King often left in the center', `Castled by move 10: ${num(castle.me, 0)}% · opponents ${num(castle.opp, 0)}%`, 'Castle early.', 1.2);
+    if (q.me > 30 && q.me > q.opp + 10 && sigRate(q.me / 100, hb.n, q.opp / 100, hb.n)) add('note', 'Frequent early queen moves', `${num(q.me, 0)}% of games · opponents ${num(q.opp, 0)}%`, '', 0.5);
   }
 
   // Engine scan
   if (scan && scan.n >= 3) {
-    const ph = scan.phaseStats.filter(p => p.n >= 30 && p.acc != null);
+    const ph = (scan.phaseVs || []).filter(p => p.nMe >= 40 && p.nOpp >= 40 && p.se2 != null).sort((x, y) => y.d - x.d);
     if (ph.length >= 2) {
-      ph.sort((a, b) => b.acc - a.acc);
-      add('strength', `Most accurate in the ${ph[0].phase}`, `${scan.phaseStats.filter(p => p.acc != null).map(p => `${p.phase} ${num(p.acc, 1)}%`).join(' · ')}`, '', 1.5);
-      const worst = ph.at(-1);
-      add('weakness', `Least accurate in the ${worst.phase}`, `${num(worst.acc, 1)}% · ${num(worst.errRate, 1)} errors per 100 moves`,
-        { opening: 'Learn the ideas behind your openings rather than move orders; review where you leave theory.', middlegame: 'Do daily tactics puzzles and practise a checks-captures-threats routine before each move.', endgame: 'Study fundamental endgames (king activity, rook endgames, pawn races).' }[worst.phase], 2);
+      const hi = ph[0], lo = ph.at(-1), ev = `accuracy vs opponents in the same phase: ${ph.map(p => `${p.phase} ${p.d >= 0 ? '+' : '−'}${num(Math.abs(p.d), 1)}`).join(' · ')}`;
+      if (hi.d - lo.d >= 1.96 * Math.sqrt(hi.se2 + lo.se2)) {
+        if (hi.d > 0) add('strength', `Strongest in the ${hi.phase}`, ev, '', 1.5);
+        add('weakness', `Weakest in the ${lo.phase}`, ev, ({ opening: 'Learn the ideas behind your openings rather than move orders; review where you leave theory.', middlegame: 'Do daily tactics puzzles and practise a checks-captures-threats routine before each move.', endgame: 'Study fundamental endgames (king activity, rook endgames, pawn races).' })[lo.phase], 1.5);
+      }
     }
     const pr = scan.pressure.filter(p => p.n >= 25);
-    if (pr.length >= 2 && pr[0].acc - pr.at(-1).acc > 8)
+    if (pr.length >= 2 && pr[0].acc - pr.at(-1).acc > 8 && pr[0].acc - pr.at(-1).acc >= 1.96 * 25 * Math.sqrt(1 / pr[0].n + 1 / pr.at(-1).n))
       add('weakness', 'Accuracy collapses under time pressure', `${num(pr[0].acc, 1)}% with time · ${num(pr.at(-1).acc, 1)}% under ${pr.at(-1).label.toLowerCase().replace('under ', '')}`, 'Play the opening faster.', 2);
-    if (scan.conversion.n >= 4 && scan.conversion.score < 0.7)
-      add('weakness', 'Missed wins', `${pct(scan.conversion.score)} from ${scan.conversion.n} winning positions`, 'When winning, check their best reply.', 2);
     const st = scan.style, sp = (r) => `${pct(r.rate)} of ${r.n}`;
+    const sc = k => sigRate(st.me[k].rate, st.me[k].n, st.opp[k].rate, st.opp[k].n);
     if (st.me.critical.n >= 30 && st.opp.critical.n >= 30) {
       const d = st.me.critical.rate - st.opp.critical.rate;
-      if (d >= 0.07) add('strength', 'You find the only move', `${sp(st.me.critical)} · opponents ${pct(st.opp.critical.rate)}`, '', 2);
-      else if (d <= -0.07) add('weakness', 'Missing critical moves', `${sp(st.me.critical)} · opponents ${pct(st.opp.critical.rate)}`, 'Slow down when the position is sharp: checks, captures and threats for both sides before moving.', 2);
+      if (d >= 0.07 && sc('critical')) add('strength', 'You find the only move', `${sp(st.me.critical)} · opponents ${pct(st.opp.critical.rate)}`, '', 2);
+      else if (d <= -0.07 && sc('critical')) add('weakness', 'Missing critical moves', `${sp(st.me.critical)} · opponents ${pct(st.opp.critical.rate)}`, 'Slow down when the position is sharp: checks, captures and threats for both sides before moving.', 2);
     }
     if (st.me.punishHard.n >= 15 && st.opp.punishHard.n >= 15) {
       const d = st.me.punishHard.rate - st.opp.punishHard.rate;
-      if (d >= 0.08) add('strength', 'You see hidden refutations', `${sp(st.me.punishHard)} · opponents ${pct(st.opp.punishHard.rate)}`, '', 2);
-      else if (d <= -0.08) add('weakness', 'Missing hidden refutations', `${sp(st.me.punishHard)} · opponents ${pct(st.opp.punishHard.rate)}`, 'Practice puzzles with quiet key moves (not captures) — they train exactly this.', 2);
+      if (d >= 0.08 && sc('punishHard')) add('strength', 'You see hidden refutations', `${sp(st.me.punishHard)} · opponents ${pct(st.opp.punishHard.rate)}`, '', 2);
+      else if (d <= -0.08 && sc('punishHard')) add('weakness', 'Missing hidden refutations', `${sp(st.me.punishHard)} · opponents ${pct(st.opp.punishHard.rate)}`, 'Practice puzzles with quiet key moves (not captures) — they train exactly this.', 2);
     }
     if (st.me.punish.n >= 8 && st.opp.punish.n >= 8) {
       const d = st.me.punish.rate - st.opp.punish.rate;
-      if (d <= -0.08) add('weakness', 'Not punishing mistakes', `${sp(st.me.punish)} · opponents ${pct(st.opp.punish.rate)}`, 'After each move: what did it allow?', 1.8);
-      else if (d >= 0.08) add('strength', 'Ruthless after mistakes', `${sp(st.me.punish)} · opponents ${pct(st.opp.punish.rate)}`, '', 1.5);
+      if (d <= -0.08 && sc('punish')) add('weakness', 'Not punishing mistakes', `${sp(st.me.punish)} · opponents ${pct(st.opp.punish.rate)}`, 'After each move: what did it allow?', 1.8);
+      else if (d >= 0.08 && sc('punish')) add('strength', 'Ruthless after mistakes', `${sp(st.me.punish)} · opponents ${pct(st.opp.punish.rate)}`, '', 1.5);
     }
-    if (st.me.sacSound.n >= 4 && st.me.sacSound.rate < 0.5) add('weakness', 'Unsound sacrifices', `${sp(st.me.sacSound)} held up`, 'Calculate to the end, or keep the material.', 1.2);
-    if (st.me.brilliants >= 1) add('strength', `${st.me.brilliants} brilliant move${st.me.brilliants > 1 ? 's' : ''}`, `${scan.n} scanned games`, '', 0.8);
+    if (st.me.sacSound.n >= 10 && st.me.sacSound.rate < st.opp.sacSound.rate && sc('sacSound')) add('weakness', 'Unsound sacrifices', `${sp(st.me.sacSound)} held up · opponents ${pct(st.opp.sacSound.rate)}`, 'Calculate to the end, or keep the material.', 1.2);
+    if (st.me.brilliants >= 1) add('note', `${st.me.brilliants} brilliant move${st.me.brilliants > 1 ? 's' : ''}`, `${scan.n} scanned games`, '', 0.8);
     const bp = Object.entries(scan.blunderPieces).map(([p, n]) => ({ p, rate: n / (scan.movesPerPiece[p] || 1), n })).filter(x => x.n >= 3).sort((a, b) => b.rate - a.rate);
-    if (bp.length) add('note', `Your ${PIECE_NAMES[bp[0].p].toLowerCase()} moves are the most error-prone`, `${bp[0].n} errors in ${scan.movesPerPiece[bp[0].p]} moves`, '', 0.7);
+    const allErr = sum(Object.values(scan.blunderPieces)), allMv = sum(Object.values(scan.movesPerPiece)), tm = bp.length ? scan.movesPerPiece[bp[0].p] : 0;
+    if (bp.length && sigRate(bp[0].rate, tm, (allErr - bp[0].n) / Math.max(1, allMv - tm), allMv - tm)) add('note', `Your ${PIECE_NAMES[bp[0].p].toLowerCase()} moves are the most error-prone`, `${bp[0].n} errors in ${scan.movesPerPiece[bp[0].p]} moves`, '', 0.7);
     // what kind of blunders, and when (js/blunders.js)
     if (scan.myMoves && typeof blunderAnatomy === 'function') {
       if (S._blAgg !== scan) { S._blAgg = scan; S._bl = blunderAnatomy(scan.myMoves); }
@@ -412,15 +430,19 @@ function computeReport(games, scan) {
       if (top && B.list.length >= 8 && top.share >= 0.3) {
         add('weakness', `Your blunders: ${top.label.toLowerCase()}`, `${pct(top.share)} of ${B.list.length} blunders · mostly ${top.cats[0].label.toLowerCase()}`, `${top.prevent} Drill: Insights → Blunders.`, 2.4);
       }
-      const risky = B.situations.find(s => ['fast', 'trouble', 'winning', 'afterCapture', 'afterCheck'].includes(s.key) && s.ratio >= 1.5 && s.blunders >= 5);
+      const risky = B.situations.find(s => ['fast', 'trouble', 'winning', 'afterCapture', 'afterCheck'].includes(s.key) && s.ratio >= 1.5 && s.blunders >= 5 && sigRate(s.rate / 100, s.n, s.base / 100, s.nElse));
       if (risky) add('weakness', `Blunder-prone: ${risky.label.toLowerCase()}`, `${num(risky.rate, 1)} blunders per 100 moves vs ${num(risky.base, 1)}`, blunderRules(B).find(r => r.why.includes('×'))?.rule || '', 1.6);
       if (B.halves && B.halves.older && B.halves.newer != null) {
         const d = (B.halves.newer - B.halves.older) / B.halves.older;
-        if (d <= -0.25) add('strength', 'Blundering less', `${num(B.halves.newer, 1)} per game lately, from ${num(B.halves.older, 1)}`, '', 1.2);
-        else if (d >= 0.25) add('weakness', 'Blundering more lately', `${num(B.halves.newer, 1)} per game lately, from ${num(B.halves.older, 1)}`, 'Faster time controls or long sessions lately?', 1.2);
+        // blunders per game are counts: Poisson error over each half's games
+        const real = Math.abs(B.halves.newer - B.halves.older) >= 1.96 * Math.sqrt((B.halves.newer + B.halves.older) / B.halves.n);
+        if (d <= -0.25 && real) add('strength', 'Blundering less', `${num(B.halves.newer, 1)} per game lately, from ${num(B.halves.older, 1)}`, '', 1.2);
+        else if (d >= 0.25 && real) add('weakness', 'Blundering more lately', `${num(B.halves.newer, 1)} per game lately, from ${num(B.halves.older, 1)}`, 'Faster time controls or long sessions lately?', 1.2);
       }
     }
-    if (scan.acc != null && scan.oppAcc != null) {
+    // game by game against the same opponents: the paired difference and its error
+    const dd = scan.perGame.filter(p => p.acc != null && p.oppAcc != null).map(p => p.acc - p.oppAcc), dm = mean(dd), dsd = dd.length > 1 ? Math.sqrt(mean(dd.map(x => (x - dm) ** 2))) : 0;
+    if (scan.acc != null && scan.oppAcc != null && dd.length >= 10 && Math.abs(dm) >= 1.96 * dsd / Math.sqrt(dd.length)) {
       if (scan.acc - scan.oppAcc >= 3) add('strength', 'You outplay your opponents', `Average accuracy ${num(scan.acc, 1)}% vs your opponents' ${num(scan.oppAcc, 1)}%.`, '', 1);
       else if (scan.oppAcc - scan.acc >= 3) add('weakness', 'Opponents play more accurately', `Average accuracy ${num(scan.acc, 1)}% vs your opponents' ${num(scan.oppAcc, 1)}%.`, '', 1);
     }

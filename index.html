@@ -26,6 +26,7 @@
     </select>
     <button type="submit" class="btn primary">Load<span class="wide-only"> games</span></button>
   </form>
+  <button id="soundToggle" class="btn ghost icon" title="Sound on/off">♪</button>
   <button id="themeToggle" class="btn ghost icon" title="Toggle light/dark">◐</button>
 </header>
 
@@ -59,7 +60,8 @@
 <main id="app" class="hidden">
   <div class="filters" id="filters">
     <div class="player-chip" id="playerChip"></div>
-    <label title="Time control">
+    <div class="seg tc-seg" id="fTimeSeg"></div>
+    <label title="Time control" class="hidden">
       <select id="fTime"><option value="all">All time controls</option><option value="bullet">Bullet</option><option value="blitz">Blitz</option><option value="rapid">Rapid</option><option value="daily">Daily</option></select>
     </label>
     <label title="Color">

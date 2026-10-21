@@ -314,7 +314,7 @@ async function fillShapeCard(el) {
   const tcs = L ? LADDER_TCS.filter(tc => L.tc[tc] && Object.keys(L.tc[tc].bands).length && ladderYou(tc) && (!P || theirs(tc))) : [];
   const view = ladderState.view || 'radar';
   if (!$('.shape-pick', el)) el.innerHTML = `<div class="row-between"><h3>Shape</h3><span class="shape-view"></span></div>
-    <div class="row-between shape-head"><div class="sub band-pick shape-pick"></div><span class="shape-tcs"></span></div>
+    <div class="row-between shape-head"><div class="sub band-pick shape-pick"></div><span class="muted small shape-tcs"></span></div>
     <div class="shape-body"></div><div class="cmp-slot"></div>`;
   slot(el, 'shape-view').innerHTML = `<div class="seg">${[['radar', 'Radar'], ['bars', 'Bars']].map(([v, l]) => `<button data-shape-view="${v}" class="${v === view ? 'active' : ''}">${l}</button>`).join('')}</div>`;
   const form = c ? `<span class="cmp-form"><input class="cmp-user" placeholder="chess.com username" value="${esc(c.user || '')}" spellcheck="false"><button class="btn small-btn cmp-go">Compare</button></span>
@@ -330,13 +330,14 @@ async function fillShapeCard(el) {
     return bindShape(el, null);
   }
   if (!$('#shapeRadar', el)) body.innerHTML = SHAPE_BODY;
-  const tc = tcs.includes(ladderState.tc) ? ladderState.tc : tcs.reduce((a, b) => (ladderYou(a).games >= ladderYou(b).games ? a : b));
+  // the header's time control when it has a ladder; otherwise the one with most of your games
+  const hf = $('#fTime')?.value, tc = tcs.includes(hf) ? hf : tcs.reduce((a, b) => (ladderYou(a).games >= ladderYou(b).games ? a : b));
   const T = L.tc[tc], you = ladderYou(tc), bands = Object.keys(T.bands).map(Number).sort((a, b) => a - b);
   const band = bands.includes(ladderState.band) && ladderState.tc === tc ? ladderState.band : nearestBand(bands, you.band);
   Object.assign(ladderState, { tc, band });
   const other = P ? { label: P.data.label, player: true, ...theirs(tc) } : { label: `Typical ${bandLabel(band)}`, vals: ladderTypical(T.bands[band]), n: {} };
   slot(el, 'shape-pick').innerHTML = `You vs ${shapeSelect(bands, P ? 'player' : band)}${!P && you.band === band ? ' · your band' : ''}${form}`;
-  slot(el, 'shape-tcs').innerHTML = ladderTcTabs(tcs, tc, 'data-shape-tc');
+  slot(el, 'shape-tcs').textContent = tc === hf ? tcTitle(tc) : `${tcTitle(tc)} · most of your games`;
   $$('.shape-radar', el).forEach(x => x.classList.toggle('hidden', view !== 'radar'));
   $$('.shape-bars', el).forEach(x => x.classList.toggle('hidden', view !== 'bars'));
   shapePane(el, 'shapeRadar', 'style-bars', T, LADDER_STYLE, you, other, 'pct');
@@ -357,7 +358,6 @@ async function fillShapeCard(el) {
 
 function bindShape(el, tc) {
   $$('[data-shape-view]', el).forEach(b => b.onclick = () => { ladderState.view = b.dataset.shapeView; fillShapeCard(el); });
-  $$('[data-shape-tc]', el).forEach(b => b.onclick = () => { ladderState.tc = b.dataset.shapeTc; ladderState.band = null; fillShapeCard(el); });
   $('#shapeBand', el).onchange = e => {
     if (e.target.value === 'player') { ladderState.cmp ||= { user: '' }; fillShapeCard(el).then(() => $('.cmp-user', el)?.focus()); return; }
     ladderState.cmp = null; ladderState.band = +e.target.value; fillShapeCard(el);
@@ -375,7 +375,9 @@ async function renderByRating(sec) {
   const L = await getLadder();
   if (!L) { sec.innerHTML = empty('Ladder data unavailable.'); return; }
   const tcs = LADDER_TCS.filter(tc => L.tc[tc] && Object.keys(L.tc[tc].bands).length);
-  const tc = tcs.includes(ladderState.ltc) ? ladderState.ltc : (tcs.includes(ladderState.tc) ? ladderState.tc : tcs.includes('blitz') ? 'blitz' : tcs[0]);
+  // follows the header's time control; without a player (guest) it has its own tabs
+  const guest = !S.games.length, hf = $('#fTime')?.value;
+  const tc = guest ? (tcs.includes(ladderState.ltc) ? ladderState.ltc : tcs.includes('blitz') ? 'blitz' : tcs[0]) : tcs.includes(hf) ? hf : (tcs.includes(ladderState.tc) ? ladderState.tc : tcs.includes('blitz') ? 'blitz' : tcs[0]);
   const T = L.tc[tc], bands = Object.keys(T.bands).map(Number).sort((a, b) => a - b);
   const you = S.games.length ? ladderYou(tc) : null;
   const metric = [...LADDER_PERF, ...LADDER_STYLE].find(x => x.key === ladderState.trend) || LADDER_PERF[0];
@@ -387,7 +389,7 @@ async function renderByRating(sec) {
       <div class="chart-box"><canvas id="ladTrendChart"></canvas></div>
     </div>
     <p class="muted small lad-foot" style="margin-top:10px"></p>`;
-  slot(sec, 'lad-tcs').innerHTML = ladderTcTabs(tcs, tc, 'data-ladder-tc');
+  slot(sec, 'lad-tcs').innerHTML = guest ? ladderTcTabs(tcs, tc, 'data-ladder-tc') : `<span class="muted small">${tcTitle(tc)}</span>`;
   $('#ladTrend', sec).innerHTML = [['Performance', LADDER_PERF], ['Style', LADDER_STYLE]].map(([g, axes]) =>
     `<optgroup label="${g}">${axes.map(x => `<option value="${x.key}" ${x.key === metric.key ? 'selected' : ''}>${x.row || x.label}</option>`).join('')}</optgroup>`).join('');
   slot(sec, 'lad-trend-sub').innerHTML = `Typical player at each rating, with the middle half of players shaded${metric.unit ? ` · ${metric.unit.replace('/100', 'per 100')}` : ''}`;

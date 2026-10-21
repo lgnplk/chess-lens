@@ -18,7 +18,7 @@ onmessage = async e => {
       if (!(m.loss >= 20) || m.cls === 'book' || m.cls === 'forced') continue;
       try { m.diag = classifyBlunder(m, a.fens); } catch { m.diag = { cat: 'positional', line: [], reply: null, lost: null }; }
       const pm = a.moves[m.ply - 1];
-      Object.assign(m.diag, { fen: a.fens[m.ply], last: pm ? { from: pm.from, to: pm.to } : null });
+      Object.assign(m.diag, { fen: a.fens[m.ply], prev: m.ply > 0 ? a.fens[m.ply - 1] : null, last: pm ? { from: pm.from, to: pm.to } : null });
     }
     // keep only the positions brilliant candidates need for their deeper check
     a.candidateFens = Object.fromEntries(a.moves.filter(m => m.cls === 'brilliant').map(m => [m.ply, a.fens[m.ply]]));

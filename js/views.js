@@ -8,19 +8,12 @@ const wdlLegend = `<div class="legend"><span><i style="background:var(--good)"><
 const empty = msg => `<div class="card"><p class="muted">${msg}</p></div>`;
 
 // ---------------- Overview ----------------
-// Summary's time control picker: the header's filter, where the summary is read (counts honour colour and rated)
 // loaded games under the colour and rated filters (the time control is chosen separately)
 function filterBase() {
   const fc = $('#fColor').value, fr = $('#fRated').value;
   return S.games.filter(g => (fc === 'all' || g.color === fc) && (fr === 'all' || g.rated));
 }
 const TC_ORDER = ['all', 'bullet', 'blitz', 'rapid', 'daily'];
-function ovTcPicker() {
-  const cur = $('#fTime').value, base = filterBase();
-  const opts = TC_ORDER.map(tc => [tc, tc === 'all' ? base.length : base.filter(g => g.timeClass === tc).length]).filter(([tc, n]) => tc === 'all' || n || tc === cur);
-  return `<div class="row-between ov-tc"><div class="seg">${opts.map(([tc, n]) => `<button data-ov-tc="${tc}" class="${tc === cur ? 'active' : ''}">${tc === 'all' ? 'All' : tcTitle(tc)} <span class="seg-n">${n}</span></button>`).join('')}</div></div>`;
-}
-const bindOvTc = sec => $$('[data-ov-tc]', sec).forEach(b => b.onclick = () => { const f = $('#fTime'); f.value = b.dataset.ovTc; f.dispatchEvent(new Event('change')); });
 
 // current chess.com ratings, per time control (from the profile, whatever the filters)
 function ratingTiles() {
@@ -30,19 +23,17 @@ function ratingTiles() {
 }
 
 function renderOverview(sec, games) {
-  if (!games.length) { sec.innerHTML = ovTcPicker() + empty('No games match these filters.'); bindOvTc(sec); return; }
+  if (!games.length) { sec.innerHTML = empty('No games match these filters.'); return; }
   const ov = computeOverview(games);
   const a = ov.all;
-  const accs = games.map(g => g.ccAccuracy?.me).filter(x => x != null);
   const st = ov.streak;
-  sec.innerHTML = `${ovTcPicker()}${ratingTiles()}
+  sec.innerHTML = `${ratingTiles()}
     <div class="tiles">
       ${tile('Games', a.n, `${a.w}W · ${a.d}D · ${a.l}L`)}
       ${tile('Score', pct(a.score, 1), `${signed(a.over)} vs rating expectation`)}
       ${tile('Performance rating', a.perf ?? '–', `avg opponent ${Math.round(mean(games.map(g => g.opp.rating)))}`)}
       ${tile('As White', pct(ov.byColor.white.score), `${ov.byColor.white.n} games`)}
       ${tile('As Black', pct(ov.byColor.black.score), `${ov.byColor.black.n} games`)}
-      ${tile('chess.com accuracy', accs.length ? num(mean(accs), 1) + '%' : '–', accs.length ? `from ${accs.length} reviewed games` : 'run Engine scan for your own')}
       ${tile('Current streak', `${st.n} ${st.type === 'win' ? 'W' : st.type === 'loss' ? 'L' : 'D'}`, 'most recent games')}
     </div>
     <div class="grid cols-2">
@@ -63,7 +54,6 @@ function renderOverview(sec, games) {
     ${(() => { const hl = computeHighlights(games); S._hl = hl; return hl.length ? `<h2 class="h2h-section">Highlights</h2><div class="highlights">${hl.map((h, i) => `<button class="highlight" data-hl="${i}" ${h.game ? '' : 'disabled'}><span class="hl-title">${h.title}</span><span class="hl-value">${esc(h.value)}</span><span class="hl-detail">${esc(h.detail)}</span></button>`).join('')}</div>` : ''; })()}`;
 
   $$('[data-hl]', sec).forEach(b => b.onclick = () => { const h = S._hl[+b.dataset.hl]; if (h?.game) openReview(h.game); });
-  bindOvTc(sec);
 
   // rating chart
   const asc = [...games].sort((x, y) => x.endTs - y.endTs);
@@ -111,7 +101,7 @@ function renderGames(sec, games) {
   sec.innerHTML = `<div class="card">
     <div class="table-tools"><input id="gq" placeholder="Search opponent or opening" value="${esc(gamesState.q)}"><span class="muted">${list.length} games · click a row to review it</span></div>
     <div class="table-wrap"><table>
-      <thead><tr>${th('date', 'Date')}<th></th><th>Result</th>${th('opp', 'Opponent')}${th('me', 'You', 'num')}<th>Time</th>${th('opening', 'Opening')}${th('moves', 'Moves', 'num')}<th>Ended by</th>${th('acc', 'Accuracy', 'num')}</tr></thead>
+      <thead><tr>${th('date', 'Date')}<th></th><th>Result</th>${th('opp', 'Opponent')}${th('me', 'You', 'num')}<th>Time</th>${th('opening', 'Opening')}${th('moves', 'Moves', 'num')}<th>Ended by</th>${th('acc', 'chess.com acc.', 'num')}</tr></thead>
       <tbody>${rows.map(g => `<tr class="clickable" data-id="${esc(g.id)}">
         <td>${fmtDate(g.end)}</td><td><span class="dot ${g.color}" title="${g.color}"></span></td><td>${resBadge(g.result)}</td>
         <td>${esc(g.opp.name)} <span class="muted">(${g.opp.rating})</span></td><td class="num">${g.me.rating}</td>
@@ -207,9 +197,7 @@ function scanControls(title, sub) {
   return `<div class="card scan-bar"><div class="row-between">
       <div><h3>${title}</h3><div class="sub">${sub}</div></div>
       <div class="scan-opts">
-        ${scanTcSelect()}
         <select class="scan-n" title="Games">${SCAN_SIZES.map(n => `<option value="${n}" ${n === scanState.n ? 'selected' : ''}>${n ? `${n} games` : 'All games'}</option>`).join('')}</select>
-        <select class="scan-d" title="Stockfish depth">${[8, 10, 12, 14].map(d => `<option value="${d}" ${d === scanState.depth ? 'selected' : ''}>Depth ${d}</option>`).join('')}</select>
         <button class="btn primary scan-go">${scanState.running ? 'Stop' : S.scanAgg ? 'Re-scan' : 'Scan'}</button>
       </div></div>
       <div class="muted small scan-est"></div>
@@ -218,14 +206,9 @@ function scanControls(title, sub) {
 }
 
 // Which time control a scan covers: chosen in the scan bar, else whatever the header filter shows
-const scanTc = () => scanState.tc || $('#fTime').value;
+const scanTc = () => $('#fTime').value;   // the header's time control
 const scanPool = () => { const tc = scanTc(); return filterBase().filter(g => (tc === 'all' || g.timeClass === tc) && g.plies >= 10); };
 const tcGames = tc => (tc === 'all' ? 'games' : `${tc} games`);
-function scanTcSelect() {
-  const base = filterBase().filter(g => g.plies >= 10), cur = scanTc();
-  const opts = TC_ORDER.map(tc => [tc, tc === 'all' ? base.length : base.filter(g => g.timeClass === tc).length]).filter(([tc, n]) => tc === 'all' || n || tc === cur);
-  return `<select class="scan-tc" title="Time control">${opts.map(([tc, n]) => `<option value="${tc}" ${tc === cur ? 'selected' : ''}>${tc === 'all' ? 'All time controls' : tcTitle(tc)} (${n})</option>`).join('')}</select>`;
-}
 
 // Scan sizes (0 = every loaded game) and a rough cost model: ms per position at each depth (top 3 lines)
 const SCAN_SIZES = [10, 25, 50, 100, 200, 500, 1000, 0];
@@ -238,7 +221,7 @@ function scanEstimate(sec, games) {
   const plies = mean(pool.slice(0, n).map(g => g.plies)) || 70;
   const mins = n * plies * SCAN_MS[scanState.depth] / analysisThreads() / ANALYSIS_SPEED / 60000;
   const t = mins < 1 ? 'under a minute' : mins < 90 ? `~${Math.round(mins)} min` : `~${(mins / 60).toFixed(1)} h`;
-  const last = S.scanAgg && S.scanInfo ? ` · last scan: ${S.scanInfo.n} ${tcGames(S.scanInfo.tc)}, depth ${S.scanInfo.depth}` : '';
+  const last = S.scanAgg && S.scanInfo ? ` · last scan: ${S.scanInfo.n} ${tcGames(S.scanInfo.tc)}` : '';
   el.innerHTML = `${n} ${tcGames(scanTc())} · ${t}${last}`;
 }
 
@@ -312,25 +295,20 @@ function renderPlaystyle(sec, games) {
     const me = prof.me, op = prof.op;
     const legend = '<div class="legend"><span><i class="lg-me"></i>You</span><span><i class="lg-band"></i>90% range</span><span><i class="lg-opp"></i>Opponents</span><span><i class="lg-exp"></i>Random good move</span></div>';
     html += `
-    <div class="grid cols-2" style="margin-bottom:14px">
-      <div class="card"><h3>Skill vs opponents</h3><div class="sub">${S.scanAgg.n} games · ${me.moves} moves</div>
-        ${prof.sharpVsOpp ? `<p>You ${prof.sharpVsOpp.what} <b>${Math.abs(prof.sharpVsOpp.d).toFixed(0)} points ${prof.sharpVsOpp.d >= 0 ? 'more' : 'less'}</b> often than your opponents.</p>` : '<p class="muted small">Needs more scanned games.</p>'}
-      </div>
-      <div class="card"><h3>Brilliancies &amp; sacrifices</h3>
+    <div class="card" style="margin-bottom:14px"><h3>Brilliancies &amp; sacrifices</h3>
         <div class="tiles" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:8px">
           ${tile('Brilliant', me.brilliants, `opponents ${op.brilliants}`)}
           ${tile('Sound sacs taken', me.sacOpp.n ? pct(me.sacOpp.rate) : '–', `${me.sacOpp.n} chances · opp. ${op.sacOpp.n ? pct(op.sacOpp.rate) : '–'}`)}
           ${tile('Sacs that held', me.sacSound.n ? pct(me.sacSound.rate) : '–', `${me.sacSound.n} played · opp. ${op.sacSound.n ? pct(op.sacSound.rate) : '–'}`)}
         </div>
         ${S.scanAgg.brilliantMoves.length ? `<div class="small">${S.scanAgg.brilliantMoves.map((b, i) => `<span class="pill clickable-pill" data-bm="${i}">${Math.floor(b.ply / 2) + 1}${b.ply % 2 ? '...' : '.'}${b.san} vs ${esc(b.game.opp.name)}</span>`).join(' ')}</div>` : ''}
-      </div>
     </div>
     <div class="card" style="margin-bottom:14px"><h3>Critical moments</h3>${legend}
       <div class="table-wrap"><table class="ci-table"><thead><tr><th></th><th class="num">You</th><th class="num">Opp.</th><th class="num">Chance</th><th></th></tr></thead><tbody>
         ${ciRow('Found the only move', 'Best move 10+ points ahead of the rest', me.critical, op.critical)}
-        ${ciRow('…when hard to see', 'Engine needed depth 5+', me.criticalHard, op.criticalHard)}
+        ${ciRow('…when hard to see', 'Only found by looking deeper', me.criticalHard, op.criticalHard)}
         ${ciRow('Punished a mistake', 'Kept most of the gain', me.punish, op.punish)}
-        ${ciRow('…when hard to see', 'Quiet refutation, depth 5+', me.punishHard, op.punishHard)}
+        ${ciRow('…when hard to see', 'A quiet move, not a capture', me.punishHard, op.punishHard)}
         ${ciRow('Took a sound sac', 'A sacrifice was among the good moves', me.sacOpp, op.sacOpp)}
         ${ciRow('Sac held up', 'Cost under 5 points', me.sacSound, op.sacSound)}
       </tbody></table></div>
@@ -348,19 +326,14 @@ function renderPlaystyle(sec, games) {
     </div>`;
   }
   if (hb) {
-    html += `<div class="grid cols-2">
-      <div class="card"><h3>Habits</h3><div class="sub">${hb.n} games, vs opponents in the same games</div>
-        <div class="table-wrap"><table><thead><tr><th></th><th class="num">You</th><th class="num">Opp.</th><th class="num">Diff.</th></tr></thead><tbody>
-        ${hb.rows.map(r => { const d = r.me - r.opp; return `<tr><td>${r.label}</td><td class="num">${r.fmt(r.me)}</td><td class="num">${r.fmt(r.opp)}</td><td class="num">${(d >= 0 ? '+' : '−') + r.fmt(Math.abs(d))}</td></tr>`; }).join('')}
-        </tbody></table></div></div>
+    html += `
       <div class="card"><h3>Repertoire &amp; clock</h3>
-        <div class="tiles" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+        <div class="tiles">
           ${tile('Opening families', hb.variety.families, `top one ${pct(hb.variety.top)} of games`)}
           ${tile('Variety', Math.round(hb.variety.index * 100) + ' / 100', '')}
           ${hb.clock ? tile('Time on moves 1–10', pct(hb.clock.openingShare), '') : ''}
           ${hb.clock ? tile('Time trouble', pct(hb.clock.trouble), `of games · opp. ${pct(hb.clock.oppTrouble)}`) : ''}
-        </div></div>
-    </div>`;
+        </div></div>`;
   }
   sec.innerHTML = html;
   if (fp) fillTwins(fp, $('#fpTwin', sec));
@@ -376,8 +349,8 @@ function renderAnalytics(sec, games) {
   const m = an.material;
   sec.innerHTML = `
     <div class="tiles">
-      ${tile('Conversion', pct(m.ahead.score), `score after going +3 material (${m.ahead.n} games)`)}
-      ${tile('Comebacks', pct(m.behind.score), `score after falling −3 material (${m.behind.n} games)`)}
+      ${tile('Up 3+ material', pct(m.ahead.score), `your score · ${m.ahead.n} games`)}
+      ${tile('Down 3+ material', pct(m.behind.score), `your score · ${m.behind.n} games`)}
       ${tile('Time-trouble games', an.timeTrouble.rate != null ? pct(an.timeTrouble.rate) : '–', an.timeTrouble.n ? `score ${pct(an.timeTrouble.score)} in them` : '')}
       ${tile('Timeouts while ahead', m.lostOnTimeAhead, 'losses on time up 2+ material')}
       ${tile('After 2 straight losses', pct(an.afterTwoLosses.score), `${an.afterTwoLosses.n} games · ${signed(an.afterTwoLosses.over)} vs exp.`)}
@@ -440,13 +413,14 @@ function bindTips(root) {
 }
 
 // ---------------- Engine scan ----------------
+// depth is fixed at 12: the ladder was measured at depth 12, so your numbers compare like for like
 const scanState = { running: false, abort: false, n: 100, depth: 12, tc: null }; // tc null: follow the header filter
 // Insights: one page — the scan bar, then style and shape, accuracy, blunders, and the ladder by rating
 function renderInsights(sec, games) {
-  if (!$('#insScan', sec)) sec.innerHTML = `<div id="insScan"></div><div id="insStyle"></div>
-    <div class="ins-scanned"><h2 class="h2h-section">Accuracy</h2><div id="insAcc"></div>
-      <h2 class="h2h-section">Blunders</h2><div id="insBl"></div></div>
-    <h2 class="h2h-section">By rating</h2><div id="insLad"></div>`;
+  if (!$('#insScan', sec)) sec.innerHTML = `<div id="insScan"></div><nav class="ins-nav"></nav><div id="insStyle"></div>
+    <div class="ins-scanned"><h2 class="h2h-section" id="insAccH">Accuracy</h2><div id="insAcc"></div>
+      <h2 class="h2h-section" id="insBlH">Blunders</h2><div id="insBl"></div></div>
+    <h2 class="h2h-section" id="insLadH">By rating</h2><div id="insLad"></div>`;
   const guest = !S.games.length, scanned = !!S.scanAgg;
   $('#insScan', sec).innerHTML = guest ? '' : scanControls('Engine scan', 'Adds accuracy, blunders and performance.');
   if (!guest) bindScan($('#insScan', sec));
@@ -455,6 +429,10 @@ function renderInsights(sec, games) {
   $('.ins-scanned', sec).classList.toggle('hidden', guest || !scanned);
   if (!guest && scanned) { renderAccuracy($('#insAcc', sec)); renderBlunders($('#insBl', sec), games); }
   renderByRating($('#insLad', sec));
+  // jump links: a long page, four parts
+  const parts = guest ? [] : [['insStyle', 'Style'], ...(scanned ? [['insAccH', 'Accuracy'], ['insBlH', 'Blunders']] : []), ['insLadH', 'By rating']];
+  $('.ins-nav', sec).innerHTML = parts.map(([id, l]) => `<button data-jump="${id}">${l}</button>`).join('');
+  $$('[data-jump]', sec).forEach(b => b.onclick = () => $('#' + b.dataset.jump).scrollIntoView({ behavior: 'smooth', block: 'start' }));
 }
 
 function renderAccuracy(sec) {
@@ -464,11 +442,8 @@ function renderAccuracy(sec) {
     <div class="tiles">
       ${tile('Games scanned', agg.n, `${agg.nMoves} of your moves`)}
       ${tile('Your accuracy', num(agg.acc, 1) + '%', `opponents ${num(agg.oppAcc, 1)}%`)}
-      ${tile('Avg centipawn loss', num(agg.acpl, 0))}
       ${tile('Blunders / game', num(t.blunder / agg.n, 2))}
       ${tile('Mistakes / game', num((t.mistake + t.miss) / agg.n, 2))}
-      ${tile('Winning-position conversion', agg.conversion.n ? pct(agg.conversion.score) : '–', `${agg.conversion.n} games reached +3`)}
-      ${tile('Saves from losing', agg.defense.n ? pct(agg.defense.score) : '–', `${agg.defense.n} games reached −3`)}
     </div>
     <div class="grid cols-2">
       <div class="card"><h3>Accuracy by game phase</h3><div class="chart-box"><canvas id="scPhase"></canvas></div>
@@ -478,11 +453,8 @@ function renderAccuracy(sec) {
       <div class="card"><h3>Accuracy under time pressure</h3><div class="sub">By clock left</div><div class="chart-box"><canvas id="scPress"></canvas></div></div>
       <div class="card"><h3>Accuracy per game</h3><div class="sub">Oldest → newest</div><div class="chart-box"><canvas id="scTrend"></canvas></div></div>
       <div class="card"><h3>Move quality</h3><div class="chart-box"><canvas id="scCls"></canvas></div></div>
-      <div class="card"><h3>Accuracy by opening</h3><div class="table-wrap"><table><thead><tr><th>Opening</th><th class="num">Games</th><th class="num">Accuracy</th><th class="num">Score</th></tr></thead><tbody>
+      <div class="card" style="grid-column:1/-1"><h3>Accuracy by opening</h3><div class="table-wrap"><table><thead><tr><th>Opening</th><th class="num">Games</th><th class="num">Accuracy</th><th class="num">Score</th></tr></thead><tbody>
         ${agg.byOpening.map(o => `<tr><td>${colorDot(o.color)} ${esc(o.name)}</td><td class="num">${o.n}</td><td class="num">${num(o.acc, 1)}</td><td class="num">${pct(o.score)}</td></tr>`).join('')}</tbody></table></div></div>
-      <div class="card"><h3>Biggest blunders</h3><div class="table-wrap"><table><thead><tr><th>Game</th><th>Move</th><th>Best was</th><th class="num">Win % lost</th></tr></thead><tbody>
-        ${agg.worstMoves.map((m, i) => `<tr class="clickable" data-wm="${i}"><td>vs ${esc(m.game.opp.name)} <span class="muted">${fmtDate(m.game.end)}</span></td><td>${Math.floor(m.ply / 2) + 1}${m.color === 'w' ? '.' : '...'} ${m.san}</td><td>${m.bestSan || ''}</td><td class="num">${num(m.loss, 0)}</td></tr>`).join('') || '<tr><td class="muted" colspan="4">No blunders found.</td></tr>'}
-        </tbody></table></div></div>
     </div>`;
   makeChart($('#scPhase'), {
     type: 'bar',
@@ -514,14 +486,11 @@ function renderAccuracy(sec) {
     data: { labels: CLS_ORDER.map(k => CLS[k].label), datasets: [{ label: 'Moves', data: CLS_ORDER.map(k => t[k]), backgroundColor: CLS_ORDER.map(k => cssVar(clsColors[k])), borderRadius: 2, maxBarThickness: 40 }] },
     options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.parsed.y} moves (${pct(c.parsed.y / agg.nMoves, 1)})` } } }, scales: baseScales() },
   });
-  $$('tr[data-wm]', sec).forEach(tr => tr.addEventListener('click', () => { const m = agg.worstMoves[+tr.dataset.wm]; openReview(m.game, m.ply + 1); }));
 }
 
 // (the scan's games come from scanPool(): the colour/rated filters plus the scan bar's time control)
 function bindScan(sec) {
-  $('.scan-tc', sec).onchange = e => { scanState.tc = e.target.value; scanEstimate(sec, scanPool()); };
   $('.scan-n', sec).onchange = e => { scanState.n = +e.target.value; scanEstimate(sec, scanPool()); };
-  $('.scan-d', sec).onchange = e => { scanState.depth = +e.target.value; scanEstimate(sec, scanPool()); };
   $('.scan-go', sec).onclick = () => {
     if (scanState.running) { scanState.abort = true; return; }
     const pool = scanPool(), list = scanState.n ? pool.slice(0, scanState.n) : pool;

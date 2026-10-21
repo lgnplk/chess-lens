@@ -253,7 +253,7 @@ function blunderAnatomy(myMoves) {
     const yes = moves.filter(x => test(x) === true), no = moves.filter(x => test(x) === false);
     if (yes.length < BL_MIN_N || no.length < BL_MIN_N) return null;
     const ry = rate(yes), rn = rate(no);
-    return { key, label, n: yes.length, blunders: yes.filter(x => x.blunder).length, rate: ry, base: rn, ratio: rn ? ry / rn : null, share: list.length ? yes.filter(x => x.blunder).length / list.length : 0 };
+    return { key, label, n: yes.length, nElse: no.length, blunders: yes.filter(x => x.blunder).length, rate: ry, base: rn, ratio: rn ? ry / rn : null, share: list.length ? yes.filter(x => x.blunder).length / list.length : 0 };
   };
   const situations = [
     cond('fast', 'Fast moves', x => x.fast),
@@ -394,10 +394,23 @@ function drawBlTrend(A) {
 // ---------- the drill: your own positions, two ways ----------
 // "Stay safe": positions where you gave something away — find any move that doesn't blunder.
 // "Find the win": positions where you missed a win — find the winning move (or one nearly as good).
+// The board behaves like a chess.com or lichess puzzle: it stays put between positions, each position arrives with
+// the opponent's last move sliding in, your move stays on the board with a ✓ or ✗ on its square, a miss slides back
+// with the engine's move as an arrow, and the engine's line can be played out on the board.
 const BL_DRILL_MODES = {
   safety: { label: 'Stay safe', sub: 'Find a safe move.', pick: b => BL_CATS[b.cat].fam !== 'chances', ok: loss => loss < 12 },
   win:    { label: 'Find the win', sub: 'Find the move you missed.', pick: b => BL_CATS[b.cat].fam === 'chances', ok: loss => loss < 5 },
 };
+
+// the position before the blunder and the move into it: kept by the scan (b.fen, b.prev, b.last); replayed for an older analysis
+function blPositions(b) {
+  if (b.fen && b.prev !== undefined && b.last !== undefined) return;
+  const fens = replayFens(b.m.game.sans.slice(0, b.m.ply)).fens;
+  b.fen ||= fens[b.m.ply];
+  b.prev = b.m.ply > 0 ? fens[b.m.ply - 1] : null;
+  const pm = b.prev ? new Chess(b.prev).move(b.m.game.sans[b.m.ply - 1], { sloppy: true }) : null;
+  b.last = pm ? { from: pm.from, to: pm.to } : null;
+}
 
 function drawBlDrill(A) {
   const box = $('#blDrill');
@@ -407,51 +420,112 @@ function drawBlDrill(A) {
   const M = BL_DRILL_MODES[mode];
   bdrill.lists ||= {}; bdrill.idx ||= {}; bdrill.score ||= {};
   if (!bdrill.lists[mode]) { bdrill.lists[mode] = shuffle(A.list.filter(M.pick)); bdrill.idx[mode] = 0; bdrill.score[mode] = { n: 0, ok: 0 }; }
-  const list = bdrill.lists[mode], sc = bdrill.score[mode];
-  const b = list[bdrill.idx[mode]];
-  const head = `<div class="row-between"><div><h3>Blunder drill</h3><div class="sub">${M.sub}</div></div>
-      <div class="seg" style="align-self:center">${Object.entries(BL_DRILL_MODES).map(([k, v]) => `<button data-blmode="${k}" class="${k === mode ? 'active' : ''}">${v.label} <span class="muted">${A.list.filter(v.pick).length}</span></button>`).join('')}</div></div>
-    ${sc.n ? `<p class="small" style="margin:8px 0 0">This session: <b>${sc.ok} of ${sc.n}</b> ${mode === 'win' ? 'found' : 'safe'}.</p>` : ''}`;
-  if (!b) { box.innerHTML = head + '<p class="muted">No positions of this kind in the scanned games.</p>'; bindBlModes(A); return; }
-  // the position and the move into it: kept by the scan (b.fen, b.last); replayed only for an older analysis
-  const fen = b.fen || (b.fen = replayFens(b.m.game.sans.slice(0, b.m.ply)).fens[b.m.ply]);
-  const toMove = b.m.color === 'w' ? 'White' : 'Black';
-  const r = bdrill.reveal;
+  const list = bdrill.lists[mode], sc = bdrill.score[mode], b = list[bdrill.idx[mode]];
+  // the frame is built once per page render; afterwards positions and verdicts only change its contents
+  if (!$('#blBoard', box)) {
+    box.innerHTML = `<div class="row-between"><div><h3>Blunder drill</h3><div class="sub bl-sub"></div></div><div class="seg bl-modes" style="align-self:center"></div></div>
+      <p class="small bl-score" style="margin:8px 0 0"></p>
+      <div class="twin-stage bl-stage"><div><div class="muted small bl-meta" style="margin-bottom:6px"></div>
+        <div class="match-board" style="--bs:min(380px, calc(100vw - 60px))"><div class="board" id="blBoard"></div></div></div>
+        <div class="twin-panel bl-panel"></div></div>`;
+    bdrill.board = new BoardView($('#blBoard', box), { onMove: (mv, fenAfter) => blDrillAnswer(mv, fenAfter) });
+    bdrill.shownKey = null;
+  }
+  $('.bl-sub', box).textContent = M.sub;
+  $('.bl-modes', box).innerHTML = Object.entries(BL_DRILL_MODES).map(([k, v]) => `<button data-blmode="${k}" class="${k === mode ? 'active' : ''}">${v.label} <span class="muted">${A.list.filter(v.pick).length}</span></button>`).join('');
+  $$('[data-blmode]', box).forEach(el => el.onclick = () => { if (bdrill.busy) return; bdrill.mode = el.dataset.blmode; bdrill.reveal = null; drawBlDrill(A); });
+  $('.bl-score', box).innerHTML = sc.n ? `This session: <b>${sc.ok} of ${sc.n}</b> ${mode === 'win' ? 'found' : 'safe'}.` : '';
+  $('.bl-stage', box).classList.toggle('hidden', !b);
+  if (!b) { $('.bl-score', box).innerHTML += '<span class="muted"> No positions of this kind in the scanned games.</span>'; return; }
+  blPositions(b);
+  Object.assign(bdrill, { cur: b, curMode: mode });
+  $('.bl-meta', box).textContent = `Position ${bdrill.idx[mode] + 1} of ${list.length} · vs ${b.m.game.opp.name} · ${fmtDate(b.m.game.end)} · move ${Math.floor(b.m.ply / 2) + 1}`;
+  // a new position: shown before the opponent's last move, which then slides in
+  const key = `${mode}:${bdrill.idx[mode]}`, orientation = b.m.color === 'w' ? 'white' : 'black';
+  if (bdrill.shownKey !== key) {
+    bdrill.shownKey = key;
+    clearTimeout(bdrill.timer);
+    if (b.prev && b.last) {
+      bdrill.board.jump({ fen: b.prev, orientation });
+      bdrill.timer = setTimeout(() => { if (bdrill.shownKey === key) bdrill.board.set({ fen: b.fen, orientation, lastMove: b.last }); }, 380);
+    } else bdrill.board.jump({ fen: b.fen, orientation, lastMove: b.last });
+  }
+  blDrillPanel();
+}
+
+function blDrillPanel(extra = '') {
+  const panel = $('#blDrill .bl-panel'), b = bdrill.cur, mode = bdrill.curMode;
+  if (!panel || !b) return;
+  const toMove = b.m.color === 'w' ? 'White' : 'Black', r = bdrill.reveal;
   const what = b.cat === 'missed_mate' ? 'there is a forced mate' : b.cat === 'missed_free' ? 'something is free' : 'there is a winning move';
-  const prompt = mode === 'win'
+  panel.innerHTML = (r ? r.html : mode === 'win'
     ? `<h3>${toMove} to move — ${what}</h3><p class="small">Find it on the board.</p><p class="muted small">Hint: ${esc(BL_CATS[b.cat].tip)}</p>`
     : `<h3>${toMove} to move</h3><p class="small">Make a safe move on the board.${b.m.clockFrac != null && b.m.clockFrac < 0.1 ? ' In the game you were short of time here.' : ''}</p>
-       <p class="muted small">Hint: ${esc(BL_FAMILIES[BL_CATS[b.cat].fam].prevent)}</p>`;
-  box.innerHTML = head + `<div class="twin-stage">
-    <div><div class="muted small" style="margin-bottom:6px">Position ${bdrill.idx[mode] + 1} of ${list.length} · vs ${esc(b.m.game.opp.name)} · ${fmtDate(b.m.game.end)} · move ${Math.floor(b.m.ply / 2) + 1}</div>
-      <div class="match-board" style="--bs:min(380px, calc(100vw - 60px))"><div class="board" id="blBoard"></div></div></div>
-    <div class="twin-panel">${r ? r.html : prompt}</div></div>`;
-  bdrill.board = new BoardView($('#blBoard'), { onMove: mv => blDrillAnswer(b, fen, mv, mode) });
-  if (b.last === undefined) {
-    const fens = replayFens(b.m.game.sans.slice(0, b.m.ply)).fens, pm = b.m.ply > 0 ? new Chess(fens[b.m.ply - 1]).move(b.m.game.sans[b.m.ply - 1], { sloppy: true }) : null;
-    b.last = pm ? { from: pm.from, to: pm.to } : null;
-  }
-  bdrill.board.set({ fen, orientation: b.m.color === 'w' ? 'white' : 'black', lastMove: b.last });
-  $('#blNext')?.addEventListener('click', () => { bdrill.idx[mode] = (bdrill.idx[mode] + 1) % list.length; bdrill.reveal = null; drawBlDrill(A); });
-  bindBlModes(A);
+       <p class="muted small">Hint: ${esc(BL_FAMILIES[BL_CATS[b.cat].fam].prevent)}</p>`) + extra;
+  $('#blNext', panel)?.addEventListener('click', blDrillNext);
+  $('#blLine', panel)?.addEventListener('click', blDrillLine);
 }
 
-function bindBlModes(A) {
-  $$('[data-blmode]').forEach(el => el.onclick = () => { if (bdrill.busy) return; bdrill.mode = el.dataset.blmode; bdrill.reveal = null; drawBlDrill(A); });
+function blDrillNext() {
+  const mode = bdrill.curMode, list = bdrill.lists?.[mode];
+  if (!list?.length) return;
+  clearTimeout(bdrill.lineTimer);
+  bdrill.idx[mode] = (bdrill.idx[mode] + 1) % list.length;
+  bdrill.reveal = null;
+  drawBlDrill(S._bl);
 }
 
-async function blDrillAnswer(b, fen, mv, mode) {
-  if (bdrill.reveal || bdrill.busy) return;
+// the engine's line from the position, played out on the board a move at a time
+function blDrillLine() {
+  const b = bdrill.cur, pv = b?.m.evalBefore?.pv;
+  if (!pv?.length) return;
+  clearTimeout(bdrill.lineTimer);
+  const steps = blPlay(b.fen, pv, 8).steps, orientation = b.m.color === 'w' ? 'white' : 'black';
+  bdrill.board.set({ fen: b.fen, orientation, lastMove: b.last });
+  let i = 0;
+  const step = () => {
+    if (bdrill.cur !== b || i >= steps.length) return;
+    const s = steps[i++];
+    bdrill.board.set({ fen: s.fen, orientation, lastMove: { from: s.mv.from, to: s.mv.to } });
+    bdrill.lineTimer = setTimeout(step, 750);
+  };
+  bdrill.lineTimer = setTimeout(step, 450);
+}
+
+async function blDrillAnswer(mv, fenAfter) {
+  const b = bdrill.cur, mode = bdrill.curMode, board = bdrill.board;
+  if (!b || bdrill.reveal || bdrill.busy) return;
   bdrill.busy = true;
+  const orientation = b.m.color === 'w' ? 'white' : 'black', moved = { from: mv.from, to: mv.to };
+  // your move stays on the board while the engine checks it
+  board.set({ fen: fenAfter, orientation, lastMove: moved });
+  blDrillPanel('<p class="muted small">Checking…</p>');
   const uci = mv.from + mv.to + (mv.promotion || '');
   let loss = null;
-  try { loss = (await scoreCandidates(getEnginePool()[0], fen, [uci, b.m.best].filter(Boolean))).loss[uci]; } catch { /* engine unavailable */ }
+  // judged exactly as the scan judged the original move, so the two agree: the position before as the scan saw
+  // it (its top-3 search), your move scored from that search if it was one of the candidates, otherwise by the
+  // scan's engine and depth on the position after it (an engine of its own, so a running scan doesn't hold it up)
+  bdrill.engine ||= NATIVE_SF ? new Engine({ native: true }) : getEnginePool()[0];
+  try {
+    const sign = b.m.color === 'w' ? 1 : -1, evB = b.m.evalBefore, own = evB?.cands?.find(c => c[0] === uci);
+    const after = own ? evalToCp({ cp: own[1], mate: own[2] }) * sign : evalToCp(await bdrill.engine.analyse(fenAfter, scanState.depth, 8000, 3)) * sign;
+    loss = Math.max(0, winPct(clamp(evalToCp(evB) * sign, -1500, 1500)) - winPct(clamp(after, -1500, 1500)));
+  } catch { /* engine unavailable */ }
   bdrill.busy = false;
-  const bestSan = b.m.best ? uciMove(fen, b.m.best)?.san : null;
-  const bestLine = b.m.evalBefore?.pv?.length ? blPlay(fen, b.m.evalBefore.pv, 6).steps.map(s => s.mv.san) : [];
+  if (bdrill.cur !== b) return;
   const ok = loss != null && BL_DRILL_MODES[mode].ok(loss);
   const sc = bdrill.score[mode];
   if (loss != null) { sc.n++; sc.ok += ok ? 1 : 0; }
+  // the verdict on the square; a miss slides back and the engine's move appears as an arrow
+  const best = b.m.best && b.m.best !== uci ? { from: b.m.best.slice(0, 2), to: b.m.best.slice(2, 4), color: cssVar('--good'), width: 0.22 } : null;
+  board.set({ fen: fenAfter, orientation, lastMove: moved, badge: { sq: mv.to, cls: ok ? 'best' : loss == null ? 'good' : 'blunder', text: ok ? '✓' : loss == null ? '?' : '✗' } });
+  if (loss != null) Sound.play(ok ? 'good' : 'bad');
+  if (!ok && loss != null) {
+    clearTimeout(bdrill.timer);
+    bdrill.timer = setTimeout(() => { if (bdrill.cur === b) board.set({ fen: b.fen, orientation, lastMove: b.last, arrows: best ? [best] : [] }); }, 650);
+  }
+  const bestSan = b.m.best ? uciMove(b.fen, b.m.best)?.san : null;
+  const bestLine = b.m.evalBefore?.pv?.length ? blPlay(b.fen, b.m.evalBefore.pv, 6).steps.map(s => s.mv.san) : [];
   const lossTxt = loss != null ? ` <span class="muted">(${loss < 1 ? "the engine's choice" : `−${loss.toFixed(0)} win-%`})</span>` : '';
   let html;
   if (mode === 'win') {
@@ -464,6 +538,8 @@ async function blDrillAnswer(b, fen, mv, mode) {
       <p class="small">You played <b>${esc(mv.san)}</b>${lossTxt}.${bestSan && bestSan !== mv.san ? ` The engine's move: <b>${esc(bestSan)}</b>.` : ''}</p>
       <p class="small">In the game you played <b>${esc(b.m.san)}</b> — ${esc(BL_CATS[b.cat].label.toLowerCase())}${b.line.length ? `: <span class="muted">${esc(b.line.join(' '))}</span>` : ''}.</p>`;
   }
-  bdrill.reveal = { html: html + `<p class="small"><i>${esc(BL_CATS[b.cat].tip)}</i></p><button class="btn primary" id="blNext">Next position →</button>` };
-  drawBlDrill(S._bl);
+  bdrill.reveal = { html: html + `<p class="small"><i>${esc(BL_CATS[b.cat].tip)}</i></p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">${bestLine.length ? '<button class="btn" id="blLine">Show the engine\'s line</button>' : ''}<button class="btn primary" id="blNext">Next position →</button></div>` };
+  $('#blDrill .bl-score').innerHTML = `This session: <b>${sc.ok} of ${sc.n}</b> ${mode === 'win' ? 'found' : 'safe'}.`;
+  blDrillPanel();
 }

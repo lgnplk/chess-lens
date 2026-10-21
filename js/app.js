@@ -31,6 +31,11 @@ function applyFilters(render = true) {
   const t = $('#fTime').value, c = $('#fColor').value, r = $('#fRated').value;
   S.filtered = S.games.filter(g => (t === 'all' || g.timeClass === t) && (c === 'all' || g.color === c) && (r === 'all' || g.rated));
   $('#fCount').textContent = `${S.filtered.length} of ${S.games.length} games`;
+  // the one time-control picker: every page reads it (counts honour the colour and rated filters)
+  const base = filterBase();
+  $('#fTimeSeg').innerHTML = TC_ORDER.map(tc => [tc, tc === 'all' ? base.length : base.filter(g => g.timeClass === tc).length]).filter(([tc, n]) => tc === 'all' || n || tc === t)
+    .map(([tc, n]) => `<button data-ftc="${tc}" class="${tc === t ? 'active' : ''}">${tc === 'all' ? 'All' : tcTitle(tc)} <span class="seg-n">${n}</span></button>`).join('');
+  $$('#fTimeSeg [data-ftc]').forEach(b => b.onclick = () => { const f = $('#fTime'); f.value = b.dataset.ftc; f.dispatchEvent(new Event('change')); });
   if (render) renderTab(S.tab);
 }
 
@@ -87,12 +92,24 @@ async function loadUser(username) {
     themeChartDefaults();
     applyFilters(false);
     switchTab(S.tab);
+    restoreScan(username);
   } catch (e) {
     console.error(e);
     setStatus(e.message || String(e), true);
   } finally {
     btn.disabled = false;
   }
+}
+
+// Engine results are cached, so the last scan comes back by itself: the loaded games already analysed (at the
+// scan's depth and lines) are re-read without engine work and the scan is rebuilt from them.
+async function restoreScan(username) {
+  const tag = getAnalysisPool()[0]?.tag || '';
+  const cached = [];
+  for (const g of S.games.filter(g => g.plies >= 10)) if (await evalCacheGet(cacheKey(g.id, scanState.depth, 3, tag))) cached.push(g);
+  if (cached.length < 10 || S.username !== username || S.scanAgg || scanState.running) return;
+  S.scanInfo = { tc: 'all', n: cached.length, depth: scanState.depth };
+  runScan(cached);
 }
 
 function initTheme() {
@@ -123,8 +140,15 @@ function initWelcome() {
   };
 }
 
+function initSound() {
+  const b = $('#soundToggle'), show = () => b.classList.toggle('off', !Sound.on());
+  show();
+  b.addEventListener('click', () => { Sound.toggle(); show(); Sound.play('move'); });
+}
+
 function init() {
   initTheme();
+  initSound();
   initWelcome();
   initReview();
   themeChartDefaults();

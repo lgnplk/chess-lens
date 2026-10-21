@@ -594,7 +594,8 @@ tbody tr:hover { background: color-mix(in srgb, var(--surface-2) 65%, transparen
   .topbar { position: static; padding: 10px 16px; gap: 10px; }
   .brand { font-size: 24px; }
   .brand .logo { font-size: 26px; }
-  #themeToggle { margin-left: auto; order: 1; }
+  #soundToggle { margin-left: auto; order: 1; }
+  #themeToggle { order: 1; }
   .brand { order: 0; }
   .loadform { order: 2; flex-basis: 100%; }
   .loadform input { min-width: 0; }
@@ -762,3 +763,19 @@ canvas.chart-in { animation: chart-in .16s ease-out; }
 .cmp-form input { width: 190px; }
 .cmp-record { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
 @media (max-width: 640px) { .cmp-form { width: 100%; } .cmp-form input { flex: 1; width: auto; min-width: 0; } }
+
+/* sound toggle: struck through when off */
+#soundToggle { margin-left: auto; }
+#soundToggle + #themeToggle { margin-left: 0; }
+#soundToggle.off { opacity: .45; text-decoration: line-through; }
+
+/* Insights: jump links to the page's parts */
+.ins-nav { display: flex; gap: 4px; flex-wrap: wrap; margin: -4px 0 14px; }
+.ins-nav:empty { display: none; }
+.ins-nav button { font: inherit; font-size: 14px; background: none; border: 1px solid var(--border); color: var(--ink-2); padding: 4px 12px; border-radius: 999px; cursor: pointer; }
+.ins-nav button:hover { color: var(--ink); border-color: var(--border-strong); }
+#insStyle, .h2h-section { scroll-margin-top: 80px; }
+
+/* the header's time-control buttons */
+.tc-seg { margin-right: 4px; }
+@media (max-width: 640px) { .tc-seg { width: 100%; overflow-x: auto; flex-wrap: nowrap; } }
