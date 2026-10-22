@@ -261,32 +261,31 @@ function cmpRecord(c) {
     </tbody></table></div></div>`;
 }
 
-// one pane: you against the other side, as a radar or as bars. scale: 'pct' (percentile among the time
-// control's players) or 'rating' (the rating whose typical player matches)
-function shapePane(el, canvasId, barsCls, T, axes, you, other, scale) {
+// one pane: you against the other side, as a radar or as bars. Each side is read on its own time control's ladder
+// (side.T), so your blitz can stand beside someone's rapid: both are placed among players of their own time
+// control. scale: 'pct' (percentile among those players) or 'rating' (the rating whose typical player matches)
+function shapePane(el, canvasId, barsCls, axes, you, other, scale) {
   const rating = scale === 'rating';
   const at = (side, a) => {
-    const vals = side.vals;
-    if (rating) return ladderRatingOf(T, a, ladderShrink(T, a, side));
-    const p = ladderPct(T.quantiles[a.key], vals?.[a.key]);
+    if (rating) return ladderRatingOf(side.T, a, ladderShrink(side.T, a, side));
+    const p = ladderPct(side.T.quantiles[a.key], side.vals?.[a.key]);
     return p == null ? null : a.invert ? 100 - p : p;
   };
   const yP = axes.map(a => at(you, a)), oP = axes.map(a => at(other, a));
   const tip = (a, label, v, r) => valTip(a, label, v) + (rating && r != null ? ` · plays like a typical ${ratingWord(r)}` : '');
   radarChart($('#' + canvasId, el), axes.map(a => a.label), [
-    { label: 'You', data: yP, slot: '--s1' },
+    { label: you.label || 'You', data: yP, slot: '--s1' },
     { label: other.label, data: oP, ...(other.player ? { slot: '--s2' } : { dashed: true }) },
   ], { rating, tooltip: c => { const a = axes[c.dataIndex], side = c.datasetIndex ? other : you; return tip(a, c.dataset.label, side.vals[a.key], (c.datasetIndex ? oP : yP)[c.dataIndex]); } });
   const rows = axes.map((a, i) => ({ a, i })).filter(({ i }) => yP[i] != null && oP[i] != null).map(({ a, i }) => ({ label: a.label, diff: yP[i] - oP[i],
-    tip: `You ${a.fmt(you.vals[a.key])} · ${other.label} ${a.fmt(other.vals[a.key])}${rating ? ' (rating points)' : ' (percentile points)'}`,
+    tip: `${you.label || 'You'} ${a.fmt(you.vals[a.key])} · ${other.label} ${a.fmt(other.vals[a.key])}${rating ? ' (rating points)' : ' (percentile points)'}`,
     faded: PERF_KEYS.has(a.key) && (you.n?.[a.key] ?? 99) < 15 }));
   rows.sort(rating ? (x, y) => y.diff - x.diff : (x, y) => Math.abs(y.diff) - Math.abs(x.diff));
   slot(el, barsCls).innerHTML = divergingBars(rows, rating, rating ? 40 : 1);
 }
 
-// the "vs" picker: every band, then a chess.com player
-const shapeSelect = (bands, cur) => `<select id="shapeBand">${bands.map(b => `<option value="${b}" ${cur !== 'player' && +b === +cur ? 'selected' : ''}>${bandLabel(b)}</option>`).join('')}
-  <option disabled>──────</option><option value="player" ${cur === 'player' ? 'selected' : ''}>chess.com player…</option></select>`;
+const shapeSelect = (bands, cur) => `<select id="shapeBand">${bands.map(b => `<option value="${b}" ${+b === +cur ? 'selected' : ''}>${bandLabel(b)}</option>`).join('')}</select>`;
+const tcSelect = (cls, tcs, cur) => `<select class="${cls}">${tcs.map(tc => `<option value="${tc}" ${tc === cur ? 'selected' : ''}>${tcTitle(tc)}</option>`).join('')}</select>`;
 
 const SHAPE_BODY = `<div class="grid cols-2 shape-grid">
     <div class="shape-pane">
@@ -310,62 +309,89 @@ async function fillShapeCard(el) {
   if (!el) return;
   const L = await getLadder();
   const c = ladderState.cmp, P = cmpPlayer();
-  const theirs = tc => P && ladderMeasure(P.data.games, tc, P.aggTc === tc ? P.agg : null);
-  const tcs = L ? LADDER_TCS.filter(tc => L.tc[tc] && Object.keys(L.tc[tc].bands).length && ladderYou(tc) && (!P || theirs(tc))) : [];
+  const has = tc => L?.tc[tc] && Object.keys(L.tc[tc].bands).length;
+  const myTcs = L ? LADDER_TCS.filter(tc => has(tc) && ladderYou(tc)) : [];
+  const theirTcs = P ? LADDER_TCS.filter(tc => has(tc) && ladderMeasure(P.data.games, tc)) : [];
   const view = ladderState.view || 'radar';
   if (!$('.shape-pick', el)) el.innerHTML = `<div class="row-between"><h3>Shape</h3><span class="shape-view"></span></div>
-    <div class="row-between shape-head"><div class="sub band-pick shape-pick"></div><span class="muted small shape-tcs"></span></div>
+    <div class="row-between shape-head"><div class="seg cmp-mode"></div><span class="muted small shape-tcs"></span></div>
+    <div class="sub band-pick shape-pick"></div>
     <div class="shape-body"></div><div class="cmp-slot"></div>`;
   slot(el, 'shape-view').innerHTML = `<div class="seg">${[['radar', 'Radar'], ['bars', 'Bars']].map(([v, l]) => `<button data-shape-view="${v}" class="${v === view ? 'active' : ''}">${l}</button>`).join('')}</div>`;
-  const form = c ? `<span class="cmp-form"><input class="cmp-user" placeholder="chess.com username" value="${esc(c.user || '')}" spellcheck="false"><button class="btn small-btn cmp-go">Compare</button></span>
-    <span class="muted small cmp-msg">${c.loading ? esc(c.msg || '') : c.error ? `<span style="color:var(--critical)">${esc(c.error)}</span>` : ''}</span>` : '';
+  slot(el, 'cmp-mode').innerHTML = `<button data-cmode="band" class="${c ? '' : 'active'}">Typical player</button><button data-cmode="player" class="${c ? 'active' : ''}">A chess.com player</button>`;
   const body = slot(el, 'shape-body');
   slot(el, 'cmp-slot').innerHTML = P ? cmpRecord(P) : '';
-  // nothing to draw yet: a player still to pick or load, or no time control in common
-  if (!tcs.length || (c && !P)) {
-    const bands = L && tcs.length ? Object.keys(L.tc[tcs[0]].bands).map(Number).sort((a, b) => a - b) : [];
-    slot(el, 'shape-pick').innerHTML = `You vs ${shapeSelect(bands, c ? 'player' : null)}${form}`;
-    slot(el, 'shape-tcs').innerHTML = '';
-    body.innerHTML = c && !P ? '' : `<p class="muted small">${!L ? 'Ladder data unavailable.' : P ? `No time control where you and ${esc(P.data.label)} both have 10+ rated games.` : 'Needs 10+ rated bullet, blitz or rapid games.'}</p>`;
-    return bindShape(el, null);
+  const stop = msg => { body.innerHTML = msg ? `<p class="muted small">${msg}</p>` : ''; bindShape(el, null); };
+  if (!myTcs.length) { slot(el, 'shape-pick').innerHTML = ''; slot(el, 'shape-tcs').textContent = ''; return stop(L ? 'Needs 10+ rated bullet, blitz or rapid games.' : 'Ladder data unavailable.'); }
+
+  // your time control: the header's (or the one with most of your games); against a player, your own picker
+  const hf = $('#fTime')?.value, most = (tcs, f) => tcs.reduce((a, b) => (f(a) >= f(b) ? a : b));
+  const myDefault = myTcs.includes(hf) ? hf : most(myTcs, tc => ladderYou(tc).games);
+  const myTc = c && myTcs.includes(ladderState.cmpMyTc) ? ladderState.cmpMyTc : myDefault;
+  const you = { ...ladderYou(myTc), T: L.tc[myTc] };
+  const form = c ? `<span class="cmp-form"><input class="cmp-user" placeholder="chess.com username" value="${esc(c.user || '')}" spellcheck="false"><button class="btn small-btn cmp-go">Compare</button></span>` : '';
+  const msg = c ? `<span class="muted small cmp-msg">${c.loading ? esc(c.msg || '') : c.error ? `<span style="color:var(--critical)">${esc(c.error)}</span>` : ''}</span>` : '';
+
+  let other, theirTc = null;
+  if (c && !P) {
+    // a player still to pick or load
+    slot(el, 'shape-pick').innerHTML = `You ${tcSelect('cmp-mytc', myTcs, myTc)} vs ${form}${msg}`;
+    slot(el, 'shape-tcs').textContent = '';
+    return stop('');
+  }
+  if (P) {
+    if (!theirTcs.length) {
+      slot(el, 'shape-pick').innerHTML = `You ${tcSelect('cmp-mytc', myTcs, myTc)} vs ${form}${msg}`;
+      return stop(`${esc(P.data.label)} has no time control with 10+ rated bullet, blitz or rapid games.`);
+    }
+    theirTc = theirTcs.includes(ladderState.cmpTheirTc) ? ladderState.cmpTheirTc : theirTcs.includes(myTc) ? myTc : most(theirTcs, tc => ladderMeasure(P.data.games, tc).games);
+    other = { label: P.data.label, player: true, ...ladderMeasure(P.data.games, theirTc, P.aggTc === theirTc ? P.agg : null), T: L.tc[theirTc] };
+    if (theirTc !== myTc) { you.label = `You (${myTc})`; other.label = `${P.data.label} (${theirTc})`; }
+    slot(el, 'shape-pick').innerHTML = `You ${tcSelect('cmp-mytc', myTcs, myTc)} vs ${form} ${tcSelect('cmp-theirtc', theirTcs, theirTc)}${msg}`;
+    slot(el, 'shape-tcs').textContent = theirTc !== myTc ? 'Each among players of their own time control' : '';
+  } else {
+    const T = you.T, bands = Object.keys(T.bands).map(Number).sort((a, b) => a - b);
+    const band = bands.includes(ladderState.band) && ladderState.tc === myTc ? ladderState.band : nearestBand(bands, you.band);
+    Object.assign(ladderState, { tc: myTc, band });
+    other = { label: `Typical ${bandLabel(band)}`, vals: ladderTypical(T.bands[band]), n: {}, T };
+    slot(el, 'shape-pick').innerHTML = `You vs ${shapeSelect(bands, band)}${you.band === band ? ' · your band' : ''}`;
+    slot(el, 'shape-tcs').textContent = myTc === hf ? tcTitle(myTc) : `${tcTitle(myTc)} · most of your games`;
   }
   if (!$('#shapeRadar', el)) body.innerHTML = SHAPE_BODY;
-  // the header's time control when it has a ladder; otherwise the one with most of your games
-  const hf = $('#fTime')?.value, tc = tcs.includes(hf) ? hf : tcs.reduce((a, b) => (ladderYou(a).games >= ladderYou(b).games ? a : b));
-  const T = L.tc[tc], you = ladderYou(tc), bands = Object.keys(T.bands).map(Number).sort((a, b) => a - b);
-  const band = bands.includes(ladderState.band) && ladderState.tc === tc ? ladderState.band : nearestBand(bands, you.band);
-  Object.assign(ladderState, { tc, band });
-  const other = P ? { label: P.data.label, player: true, ...theirs(tc) } : { label: `Typical ${bandLabel(band)}`, vals: ladderTypical(T.bands[band]), n: {} };
-  slot(el, 'shape-pick').innerHTML = `You vs ${shapeSelect(bands, P ? 'player' : band)}${!P && you.band === band ? ' · your band' : ''}${form}`;
-  slot(el, 'shape-tcs').textContent = tc === hf ? tcTitle(tc) : `${tcTitle(tc)} · most of your games`;
   $$('.shape-radar', el).forEach(x => x.classList.toggle('hidden', view !== 'radar'));
   $$('.shape-bars', el).forEach(x => x.classList.toggle('hidden', view !== 'bars'));
-  shapePane(el, 'shapeRadar', 'style-bars', T, LADDER_STYLE, you, other, 'pct');
+  shapePane(el, 'shapeRadar', 'style-bars', LADDER_STYLE, you, other, 'pct');
 
   // performance: your scan, and the other side's (a band's typical player has one; a chess.com player needs analysing)
   const mine = hasPerf(you.vals), ok = mine && hasPerf(other.vals);
   slot(el, 'perf-pane').classList.toggle('pending', !ok);
   const sub = slot(el, 'perf-sub');
-  if (ok) { sub.textContent = ''; shapePane(el, 'perfRadar', 'perf-bars', T, PERF_RADAR, you, other, 'rating'); }
+  if (ok) { sub.textContent = ''; shapePane(el, 'perfRadar', 'perf-bars', PERF_RADAR, you, other, 'rating'); }
   else {
     slot(el, 'perf-bars').innerHTML = '';
-    if (!mine) sub.textContent = S.scanAgg ? `Scan some ${tc} games to see this.` : 'Scan your games to see this.';
+    if (!mine) sub.textContent = S.scanAgg ? `Scan some ${myTc} games to see this.` : 'Scan your games to see this.';
     else if (P?.run) sub.textContent = `Analyzing ${P.data.label}'s games: ${P.run.done} of ${P.run.n}…`;
-    else sub.innerHTML = `<button class="btn small-btn primary cmp-an">Analyze ${esc(other.label)}'s ${tc} games</button> <span class="muted small">25 games</span>`;
+    else sub.innerHTML = `<button class="btn small-btn primary cmp-an">Analyze ${esc(P.data.label)}'s ${theirTc} games</button> <span class="muted small">25 games</span>`;
   }
-  bindShape(el, tc);
+  bindShape(el, theirTc);
 }
 
-function bindShape(el, tc) {
+function bindShape(el, theirTc) {
   $$('[data-shape-view]', el).forEach(b => b.onclick = () => { ladderState.view = b.dataset.shapeView; fillShapeCard(el); });
-  $('#shapeBand', el).onchange = e => {
-    if (e.target.value === 'player') { ladderState.cmp ||= { user: '' }; fillShapeCard(el).then(() => $('.cmp-user', el)?.focus()); return; }
-    ladderState.cmp = null; ladderState.band = +e.target.value; fillShapeCard(el);
-  };
-  const input = $('.cmp-user', el), go = () => loadCmp(el, input.value);
+  $$('[data-cmode]', el).forEach(b => b.onclick = () => {
+    if (b.dataset.cmode === 'band') ladderState.cmp = null;
+    else ladderState.cmp ||= { user: '' };
+    fillShapeCard(el).then(() => { if (ladderState.cmp && !cmpPlayer()) $('.cmp-user', el)?.focus(); });
+  });
+  const band = $('#shapeBand', el);
+  if (band) band.onchange = e => { ladderState.band = +e.target.value; fillShapeCard(el); };
+  const mytc = $('.cmp-mytc', el), theirtc = $('.cmp-theirtc', el);
+  if (mytc) mytc.onchange = e => { ladderState.cmpMyTc = e.target.value; fillShapeCard(el); };
+  if (theirtc) theirtc.onchange = e => { ladderState.cmpTheirTc = e.target.value; fillShapeCard(el); };
+  const input = $('.cmp-user', el), go = () => { ladderState.cmpTheirTc = null; loadCmp(el, input.value); };
   if (input) { $('.cmp-go', el).onclick = go; input.onkeydown = e => { if (e.key === 'Enter') go(); }; }
   const an = $('.cmp-an', el);
-  if (an) an.onclick = () => analyzeCmp(el, tc);
+  if (an) an.onclick = () => analyzeCmp(el, theirTc);
   const P = cmpPlayer();
   if (P) $$('[data-cg]', el).forEach(tr => tr.onclick = () => openReview(cmpGames(P)[+tr.dataset.cg]));
 }
