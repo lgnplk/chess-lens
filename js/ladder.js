@@ -208,44 +208,66 @@ function divergingBars(rows, goodBad, unit = 1) {
   }).join('');
 }
 
-// ---------- the comparison: a band's typical player, or a chess.com player ----------
-// ladderState.cmp, once "chess.com player" is chosen: { user, data, loading, msg, error, agg, aggTc, run }
-function cmpPlayer() { const c = ladderState.cmp; return c?.data ? c : null; }
+// ---------- the comparison: a stack of radars ----------
+// You, plus up to five others on the same radars: the typical player of any rating band, chess.com players, and
+// the legends (their classical over-the-board games). Each is read on its own time control's ladder, so your blitz
+// can stand beside someone's rapid; a legend is placed on the rapid ladder by default (the closest to classical).
+// ladderState.stack: [{ kind: 'band', tc, band } | { kind: 'player', user, label, data, tc, agg, aggTc, aggN, run }
+//   | { kind: 'legend', id, label, data, tc, agg, aggN, run }]; null until changed (then: your band's typical player)
+const STACK_MAX = 5, STACK_SLOTS = ['--s2', '--s3', '--s4', '--s5', '--s6'];
+const AN_SIZES = [25, 50, 100, 200];
+const stackPlayers = () => (ladderState.stack || []).filter(s => s.kind !== 'band' && s.data);
+let _anQueue = Promise.resolve();   // engine runs one at a time (they share the analysis engines)
 
-async function loadCmp(el, user) {
-  user = user.trim().toLowerCase();
-  if (!user) return;
-  if (user === (S.username || '').toLowerCase()) { ladderState.cmp = { user, error: "That's you. Pick someone else." }; fillShapeCard(el); return; }
-  const c = ladderState.cmp = { user, loading: true, msg: 'Loading…' };
+async function addToStack(el, item) {
+  const st = ladderState.stack ||= [];
+  if (st.length >= STACK_MAX) return;
+  st.push(item);
+  if (item.kind === 'band') return fillShapeCard(el);
+  const src = item.kind === 'legend' ? famousSource(FAMOUS.find(f => f.id === item.id)) : { kind: 'chesscom', user: item.user, months: S.months };
+  Object.assign(item, { loading: true, msg: 'Loading…' });
   fillShapeCard(el);
-  try { c.data = await loadSource({ kind: 'chesscom', user, months: S.months }, m => { c.msg = m; const s = $('.cmp-msg', el); if (s) showStatus(s, m); }); }
-  catch (e) { c.error = e.message || String(e); }
-  c.loading = false;
-  if (ladderState.cmp === c) fillShapeCard(el);
+  try { item.data = await loadSource(src, m => { item.msg = m; }); item.label = item.data.label; }
+  catch (e) { item.error = e.message || String(e); }
+  item.loading = false;
+  fillShapeCard(el);
 }
 
-// their engine numbers: Stockfish over their latest games in this time control, as your scan does yours
-async function analyzeCmp(el, tc) {
-  const c = cmpPlayer();
-  if (!c || c.run) return;
-  const list = c.data.games.filter(g => g.timeClass === tc && g.plies >= 10).slice(0, 25), results = [];
-  c.run = { done: 0, n: list.length };
+// their engine numbers: Stockfish over their latest n games (in the chip's time control; all of a legend's),
+// measured as your scan measures you
+function analyzeStack(el, item, n) {
+  if (item.run || !(n > 0)) return;
+  const pool = item.data.games.filter(g => (g.plies ?? g.sans.length) >= 10 && (item.kind === 'legend' || g.timeClass === item.tc));
+  const list = pool.slice(0, n), results = [];
+  item.run = { done: 0, n: list.length, waiting: true };
   fillShapeCard(el);
-  await analyzeGamesParallel(list, 12, {
-    onProgress: (f, d) => { c.run.done = d; const s = $('.perf-sub', el); if (s) s.textContent = `Analyzing ${c.data.label}'s games: ${d} of ${list.length}…`; },
-    onResult: (g, a) => results.push({ game: g, analysis: a }),
+  _anQueue = _anQueue.then(async () => {
+    item.run.waiting = false;
+    await analyzeGamesParallel(list, scanState.depth, {
+      onProgress: (f, d) => { item.run.done = d; const s = $(`[data-sr="${ladderState.stack.indexOf(item)}"] .sr-run`, el); if (s) s.textContent = `analyzing ${d} of ${list.length}…`; },
+      onResult: (g, a) => results.push({ game: g, analysis: a }),
+    });
+    Object.assign(item, { agg: results.length ? aggregateScan(results) : null, aggTc: item.tc, aggN: results.length, run: null });
+    if (ladderState.stack?.includes(item)) fillShapeCard(el);
   });
-  c.agg = results.length ? aggregateScan(results) : null;
-  c.aggTc = tc;
-  c.run = null;
-  if (ladderState.cmp === c) fillShapeCard(el);
 }
 
-// your record against them (from your loaded games), and their current ratings
-const cmpGames = c => S.games.filter(g => (g.opp.name || '').toLowerCase() === c.data.label.toLowerCase());
-function cmpRecord(c) {
-  const name = c.data.label, games = cmpGames(c);
-  const st = c.data.player?.stats || {};
+// a legend's numbers: their games aren't online time controls, so all of them count (habits from the latest 100)
+function legendMeasure(item) {
+  const vals = { ...(ladderHabits(item.data.games.slice(0, LADDER_YOU_GAMES)) || {}) };
+  let n = {};
+  if (item.agg) {
+    const p = ladderPerf({ ...item.agg, perGame: item.agg.perGame.map(x => ({ ...x, game: { ...x.game, timeClass: '*' } })) }, '*');
+    Object.assign(vals, p?.vals || {}); n = p?.n || {};
+  }
+  return { vals, n, games: item.data.games.length, band: null };
+}
+
+// your record against a player (from your loaded games), and their current ratings
+const cmpGames = name => S.games.filter(g => (g.opp.name || '').toLowerCase() === name.toLowerCase());
+function cmpRecord(item) {
+  const name = item.data.label, games = cmpGames(name);
+  const st = item.data.player?.stats || {};
   const rat = ['bullet', 'blitz', 'rapid', 'daily'].map(k => (st['chess_' + k]?.last ? `${tcTitle(k)} <b>${st['chess_' + k].last.rating}</b>` : '')).filter(Boolean).join(' · ');
   if (!games.length) return `<div class="cmp-record"><p class="small muted">${rat ? `${esc(name)}: ${rat}. ` : ''}You haven't played ${esc(name)} in the loaded period.</p></div>`;
   const r = wdl(games), byTc = [...groupBy(games, g => g.timeClass)].map(([tc, gs]) => ({ tc, ...wdl(gs) }));
@@ -257,35 +279,34 @@ function cmpRecord(c) {
       ${byTc.map(t => tile(t.tc, `${t.w}–${t.d}–${t.l}`, `${pct(t.score)} for you`)).join('')}
     </div>
     <div class="table-wrap" style="max-height:280px;overflow-y:auto"><table><thead><tr><th>Date</th><th></th><th>Result</th><th>Time</th><th>Opening</th><th class="num">Moves</th></tr></thead><tbody>
-      ${games.slice(0, 100).map((g, i) => `<tr class="clickable" data-cg="${i}"><td>${fmtDate(g.end)}</td><td><span class="dot ${g.color}"></span></td><td>${resBadge(g.result)}</td><td><span class="pill">${tcLabel(g)}</span></td><td>${esc(g.opening.length > 40 ? g.opening.slice(0, 38) + '…' : g.opening)}</td><td class="num">${g.moves}</td></tr>`).join('')}
+      ${games.slice(0, 100).map((g, i) => `<tr class="clickable" data-cg="${esc(name)}|${i}"><td>${fmtDate(g.end)}</td><td><span class="dot ${g.color}"></span></td><td>${resBadge(g.result)}</td><td><span class="pill">${tcLabel(g)}</span></td><td>${esc(g.opening.length > 40 ? g.opening.slice(0, 38) + '…' : g.opening)}</td><td class="num">${g.moves}</td></tr>`).join('')}
     </tbody></table></div></div>`;
 }
 
-// one pane: you against the other side, as a radar or as bars. Each side is read on its own time control's ladder
-// (side.T), so your blitz can stand beside someone's rapid: both are placed among players of their own time
-// control. scale: 'pct' (percentile among those players) or 'rating' (the rating whose typical player matches)
-function shapePane(el, canvasId, barsCls, axes, you, other, scale) {
-  const rating = scale === 'rating';
-  const at = (side, a) => {
-    if (rating) return ladderRatingOf(side.T, a, ladderShrink(side.T, a, side));
-    const p = ladderPct(side.T.quantiles[a.key], side.vals?.[a.key]);
-    return p == null ? null : a.invert ? 100 - p : p;
-  };
-  const yP = axes.map(a => at(you, a)), oP = axes.map(a => at(other, a));
-  const tip = (a, label, v, r) => valTip(a, label, v) + (rating && r != null ? ` · plays like a typical ${ratingWord(r)}` : '');
-  radarChart($('#' + canvasId, el), axes.map(a => a.label), [
-    { label: you.label || 'You', data: yP, slot: '--s1' },
-    { label: other.label, data: oP, ...(other.player ? { slot: '--s2' } : { dashed: true }) },
-  ], { rating, tooltip: c => { const a = axes[c.dataIndex], side = c.datasetIndex ? other : you; return tip(a, c.dataset.label, side.vals[a.key], (c.datasetIndex ? oP : yP)[c.dataIndex]); } });
-  const rows = axes.map((a, i) => ({ a, i })).filter(({ i }) => yP[i] != null && oP[i] != null).map(({ a, i }) => ({ label: a.label, diff: yP[i] - oP[i],
-    tip: `${you.label || 'You'} ${a.fmt(you.vals[a.key])} · ${other.label} ${a.fmt(other.vals[a.key])}${rating ? ' (rating points)' : ' (percentile points)'}`,
-    faded: PERF_KEYS.has(a.key) && (you.n?.[a.key] ?? 99) < 15 }));
-  rows.sort(rating ? (x, y) => y.diff - x.diff : (x, y) => Math.abs(y.diff) - Math.abs(x.diff));
-  slot(el, barsCls).innerHTML = divergingBars(rows, rating, rating ? 40 : 1);
+// a radar value: each series on its own time control's ladder. scale: 'pct' (percentile among those players) or
+// 'rating' (the rating whose typical player matches, after pulling small samples toward the series' band)
+function seriesValue(side, a, scale) {
+  if (scale === 'rating') return ladderRatingOf(side.T, a, ladderShrink(side.T, a, side));
+  const p = ladderPct(side.T.quantiles[a.key], side.vals?.[a.key]);
+  return p == null ? null : a.invert ? 100 - p : p;
 }
 
-const shapeSelect = (bands, cur) => `<select id="shapeBand">${bands.map(b => `<option value="${b}" ${+b === +cur ? 'selected' : ''}>${bandLabel(b)}</option>`).join('')}</select>`;
-const tcSelect = (cls, tcs, cur) => `<select class="${cls}">${tcs.map(tc => `<option value="${tc}" ${tc === cur ? 'selected' : ''}>${tcTitle(tc)}</option>`).join('')}</select>`;
+// one pane: all the series on one radar; the bars compare you with the first of the others
+function shapePane(el, canvasId, barsCls, axes, series, scale) {
+  const rating = scale === 'rating', pts = series.map(s => axes.map(a => seriesValue(s, a, scale)));
+  const tip = (a, s, r) => valTip(a, s.label, s.vals[a.key]) + (rating && r != null ? ` · plays like a typical ${ratingWord(r)}` : '');
+  radarChart($('#' + canvasId, el), axes.map(a => a.label), series.map((s, i) => ({ label: s.label, data: pts[i], slot: s.slot, dashed: s.dashed })),
+    { rating, tooltip: c => tip(axes[c.dataIndex], series[c.datasetIndex], pts[c.datasetIndex][c.dataIndex]) });
+  const [you, other] = series, [yP, oP] = pts;
+  if (!other) { slot(el, barsCls).innerHTML = ''; return; }
+  const rows = axes.map((a, i) => ({ a, i })).filter(({ i }) => yP[i] != null && oP[i] != null).map(({ a, i }) => ({ label: a.label, diff: yP[i] - oP[i],
+    tip: `${you.label} ${a.fmt(you.vals[a.key])} · ${other.label} ${a.fmt(other.vals[a.key])}${rating ? ' (rating points)' : ' (percentile points)'}`,
+    faded: PERF_KEYS.has(a.key) && (you.n?.[a.key] ?? 99) < 15 }));
+  rows.sort(rating ? (x, y) => y.diff - x.diff : (x, y) => Math.abs(y.diff) - Math.abs(x.diff));
+  slot(el, barsCls).innerHTML = `<div class="muted small" style="margin-bottom:4px">${esc(you.label)} against ${esc(other.label)}</div>` + divergingBars(rows, rating, rating ? 40 : 1);
+}
+
+const tcSelect = (cls, tcs, cur, attrs = '') => `<select class="${cls}" ${attrs}>${tcs.map(tc => `<option value="${tc}" ${tc === cur ? 'selected' : ''}>${tcTitle(tc)}</option>`).join('')}</select>`;
 
 const SHAPE_BODY = `<div class="grid cols-2 shape-grid">
     <div class="shape-pane">
@@ -303,97 +324,118 @@ const SHAPE_BODY = `<div class="grid cols-2 shape-grid">
     </div>
   </div>`;
 
-// ---------- "Shape": you vs a band's typical player or a chess.com player, as a Style radar (habits,
-// percentiles) and a Performance radar (from scans, on the rating scale), with a bars view ----------
+// ---------- "Shape": you and a stack of others, as a Style radar (habits, percentiles) and a Performance radar
+// (from scans, on the rating scale), with a bars view of you against the first of them ----------
 async function fillShapeCard(el) {
   if (!el) return;
   const L = await getLadder();
-  const c = ladderState.cmp, P = cmpPlayer();
   const has = tc => L?.tc[tc] && Object.keys(L.tc[tc].bands).length;
-  const myTcs = L ? LADDER_TCS.filter(tc => has(tc) && ladderYou(tc)) : [];
-  const theirTcs = P ? LADDER_TCS.filter(tc => has(tc) && ladderMeasure(P.data.games, tc)) : [];
+  const tcsAll = LADDER_TCS.filter(has);
+  const myTcs = tcsAll.filter(tc => ladderYou(tc));
   const view = ladderState.view || 'radar';
-  if (!$('.shape-pick', el)) el.innerHTML = `<div class="row-between"><h3>Shape</h3><span class="shape-view"></span></div>
-    <div class="row-between shape-head"><div class="seg cmp-mode"></div><span class="muted small shape-tcs"></span></div>
-    <div class="sub band-pick shape-pick"></div>
+  if (!$('.shape-series', el)) el.innerHTML = `<div class="row-between"><h3>Shape</h3><span class="shape-view"></span></div>
+    <div class="shape-series"></div><div class="sr-addrow hidden"></div>
     <div class="shape-body"></div><div class="cmp-slot"></div>`;
   slot(el, 'shape-view').innerHTML = `<div class="seg">${[['radar', 'Radar'], ['bars', 'Bars']].map(([v, l]) => `<button data-shape-view="${v}" class="${v === view ? 'active' : ''}">${l}</button>`).join('')}</div>`;
-  slot(el, 'cmp-mode').innerHTML = `<button data-cmode="band" class="${c ? '' : 'active'}">Typical player</button><button data-cmode="player" class="${c ? 'active' : ''}">A chess.com player</button>`;
   const body = slot(el, 'shape-body');
-  slot(el, 'cmp-slot').innerHTML = P ? cmpRecord(P) : '';
-  const stop = msg => { body.innerHTML = msg ? `<p class="muted small">${msg}</p>` : ''; bindShape(el, null); };
-  if (!myTcs.length) { slot(el, 'shape-pick').innerHTML = ''; slot(el, 'shape-tcs').textContent = ''; return stop(L ? 'Needs 10+ rated bullet, blitz or rapid games.' : 'Ladder data unavailable.'); }
+  if (!myTcs.length) { slot(el, 'shape-series').innerHTML = ''; body.innerHTML = `<p class="muted small">${L ? 'Needs 10+ rated bullet, blitz or rapid games.' : 'Ladder data unavailable.'}</p>`; return; }
 
-  // your time control: the header's (or the one with most of your games); against a player, your own picker
+  // you: the header's time control (or the one with most of your games), or your own pick
   const hf = $('#fTime')?.value, most = (tcs, f) => tcs.reduce((a, b) => (f(a) >= f(b) ? a : b));
-  const myDefault = myTcs.includes(hf) ? hf : most(myTcs, tc => ladderYou(tc).games);
-  const myTc = c && myTcs.includes(ladderState.cmpMyTc) ? ladderState.cmpMyTc : myDefault;
-  const you = { ...ladderYou(myTc), T: L.tc[myTc] };
-  const form = c ? `<span class="cmp-form"><input class="cmp-user" placeholder="chess.com username" value="${esc(c.user || '')}" spellcheck="false"><button class="btn small-btn cmp-go">Compare</button></span>` : '';
-  const msg = c ? `<span class="muted small cmp-msg">${c.loading ? esc(c.msg || '') : c.error ? `<span style="color:var(--critical)">${esc(c.error)}</span>` : ''}</span>` : '';
-
-  let other, theirTc = null;
-  if (c && !P) {
-    // a player still to pick or load
-    slot(el, 'shape-pick').innerHTML = `You ${tcSelect('cmp-mytc', myTcs, myTc)} vs ${form}${msg}`;
-    slot(el, 'shape-tcs').textContent = '';
-    return stop('');
-  }
-  if (P) {
-    if (!theirTcs.length) {
-      slot(el, 'shape-pick').innerHTML = `You ${tcSelect('cmp-mytc', myTcs, myTc)} vs ${form}${msg}`;
-      return stop(`${esc(P.data.label)} has no time control with 10+ rated bullet, blitz or rapid games.`);
+  const myTc = myTcs.includes(ladderState.myTc) ? ladderState.myTc : myTcs.includes(hf) ? hf : most(myTcs, tc => ladderYou(tc).games);
+  const you = { ...ladderYou(myTc), T: L.tc[myTc], label: 'You', slot: '--s1' };
+  // the default stack: the typical player of your band
+  ladderState.stack ||= [{ kind: 'band', tc: null, band: null }];
+  const stack = ladderState.stack;
+  const series = [you], chips = [], notShownPerf = [];
+  stack.forEach((it, i) => {
+    const color = STACK_SLOTS[i % STACK_SLOTS.length];
+    const x = `<button class="sr-x" data-srx="${i}" title="Remove">×</button>`;
+    if (it.kind === 'band') {
+      const tc = has(it.tc) ? it.tc : myTc, T = L.tc[tc], bands = Object.keys(T.bands).map(Number).sort((a, b) => a - b);
+      const band = bands.includes(it.band) ? it.band : nearestBand(bands, you.band);
+      Object.assign(it, { tc, band });
+      series.push({ label: `Typical ${bandLabel(band)}${tc !== myTc ? ` (${tc})` : ''}`, vals: ladderTypical(T.bands[band]), n: {}, T, slot: color, dashed: true });
+      chips.push(`<span class="sr-chip" data-sr="${i}"><i style="background:var(${color})"></i>Typical <select class="sr-band">${bands.map(b => `<option value="${b}" ${b === band ? 'selected' : ''}>${bandLabel(b)}</option>`).join('')}</select>${tcSelect('sr-tc', tcsAll, tc)}${you.band === band && tc === myTc ? '<span class="muted small">your band</span>' : ''}${x}</span>`);
+      return;
     }
-    theirTc = theirTcs.includes(ladderState.cmpTheirTc) ? ladderState.cmpTheirTc : theirTcs.includes(myTc) ? myTc : most(theirTcs, tc => ladderMeasure(P.data.games, tc).games);
-    other = { label: P.data.label, player: true, ...ladderMeasure(P.data.games, theirTc, P.aggTc === theirTc ? P.agg : null), T: L.tc[theirTc] };
-    if (theirTc !== myTc) { you.label = `You (${myTc})`; other.label = `${P.data.label} (${theirTc})`; }
-    slot(el, 'shape-pick').innerHTML = `You ${tcSelect('cmp-mytc', myTcs, myTc)} vs ${form} ${tcSelect('cmp-theirtc', theirTcs, theirTc)}${msg}`;
-    slot(el, 'shape-tcs').textContent = theirTc !== myTc ? 'Each among players of their own time control' : '';
-  } else {
-    const T = you.T, bands = Object.keys(T.bands).map(Number).sort((a, b) => a - b);
-    const band = bands.includes(ladderState.band) && ladderState.tc === myTc ? ladderState.band : nearestBand(bands, you.band);
-    Object.assign(ladderState, { tc: myTc, band });
-    other = { label: `Typical ${bandLabel(band)}`, vals: ladderTypical(T.bands[band]), n: {}, T };
-    slot(el, 'shape-pick').innerHTML = `You vs ${shapeSelect(bands, band)}${you.band === band ? ' · your band' : ''}`;
-    slot(el, 'shape-tcs').textContent = myTc === hf ? tcTitle(myTc) : `${tcTitle(myTc)} · most of your games`;
-  }
+    const name = esc(it.label || it.user || FAMOUS.find(f => f.id === it.id)?.name || '');
+    if (!it.data) {
+      chips.push(`<span class="sr-chip" data-sr="${i}"><i style="background:var(${color})"></i>${name} <span class="muted small">${it.error ? `<span style="color:var(--critical)">${esc(it.error)}</span>` : esc(it.msg || 'loading…')}</span>${x}</span>`);
+      return;
+    }
+    let m, tcs = tcsAll;
+    if (it.kind === 'legend') { it.tc = has(it.tc) ? it.tc : 'rapid'; m = legendMeasure(it); }
+    else {
+      tcs = tcsAll.filter(tc => ladderMeasure(it.data.games, tc));
+      if (!tcs.length) { chips.push(`<span class="sr-chip" data-sr="${i}"><i style="background:var(${color})"></i>${name} <span class="muted small">no time control with 10+ rated games</span>${x}</span>`); return; }
+      it.tc = tcs.includes(it.tc) ? it.tc : tcs.includes(myTc) ? myTc : most(tcs, tc => ladderMeasure(it.data.games, tc).games);
+      m = ladderMeasure(it.data.games, it.tc, it.aggTc === it.tc ? it.agg : null);
+    }
+    const label = it.kind === 'legend' ? it.label : it.tc !== myTc ? `${it.label} (${it.tc})` : it.label;
+    const s = { ...m, T: L.tc[it.tc], label, slot: color };
+    series.push(s);
+    if (!hasPerf(s.vals)) notShownPerf.push(label);
+    const avail = it.data.games.filter(g => (g.plies ?? g.sans.length) >= 10 && (it.kind === 'legend' || g.timeClass === it.tc)).length;
+    const sizes = AN_SIZES.filter(n => n <= Math.max(25, avail));
+    const engine = it.run ? `<span class="muted small sr-run">${it.run.waiting ? 'waiting for the engine…' : `analyzing ${it.run.done} of ${it.run.n}…`}</span>`
+      : `<span class="sr-an-wrap">${it.aggN && it.aggTc === it.tc ? `<span class="muted small">${it.aggN} analysed</span>` : ''}<select class="sr-n">${sizes.map(n => `<option value="${n}" ${n === (it.lastN || 25) ? 'selected' : ''}>${Math.min(n, avail)} games</option>`).join('')}</select><button class="btn small-btn sr-an">${it.aggN && it.aggTc === it.tc ? 'Re-analyze' : 'Analyze'}</button></span>`;
+    chips.push(`<span class="sr-chip" data-sr="${i}"><i style="background:var(${color})"></i>${esc(it.label)}${it.kind === 'legend' ? ` <span class="muted small" title="Classical over-the-board games, placed among online players of this time control">classical, as</span>` : ''}${tcSelect('sr-tc', tcs, it.tc)}${engine}${x}</span>`);
+  });
+  slot(el, 'shape-series').innerHTML = `<span class="sr-chip sr-you"><i style="background:var(--s1)"></i>You${tcSelect('sr-mytc', myTcs, myTc)}</span>
+    <span class="muted small">vs</span>${chips.join('')}${stack.length < STACK_MAX ? '<button class="btn small-btn sr-add">+ Add</button>' : ''}`;
+  // the add row: a typical player of any band, a chess.com player, or a legend
+  const bands0 = Object.keys(L.tc[myTc].bands).map(Number).sort((a, b) => a - b);
+  slot(el, 'sr-addrow').innerHTML = `<span>Typical player ${tcSelect('ad-tc', tcsAll, myTc)}<select class="ad-band">${bands0.map(b => `<option value="${b}" ${b === nearestBand(bands0, you.band + LADDER_BAND) ? 'selected' : ''}>${bandLabel(b)}</option>`).join('')}</select><button class="btn small-btn ad-band-go">Add</button></span>
+    <span>Player <input class="ad-user" placeholder="chess.com username" spellcheck="false"><button class="btn small-btn ad-user-go">Add</button></span>
+    <span>Legend <select class="ad-legend">${FAMOUS.map(f => `<option value="${f.id}">${esc(f.name)}</option>`).join('')}</select><button class="btn small-btn ad-legend-go">Add</button></span>`;
+  slot(el, 'cmp-slot').innerHTML = stackPlayers().filter(s => s.kind === 'player').map(cmpRecord).join('');
+
   if (!$('#shapeRadar', el)) body.innerHTML = SHAPE_BODY;
   $$('.shape-radar', el).forEach(x => x.classList.toggle('hidden', view !== 'radar'));
   $$('.shape-bars', el).forEach(x => x.classList.toggle('hidden', view !== 'bars'));
-  shapePane(el, 'shapeRadar', 'style-bars', LADDER_STYLE, you, other, 'pct');
+  shapePane(el, 'shapeRadar', 'style-bars', LADDER_STYLE, series, 'pct');
 
-  // performance: your scan, and the other side's (a band's typical player has one; a chess.com player needs analysing)
-  const mine = hasPerf(you.vals), ok = mine && hasPerf(other.vals);
-  slot(el, 'perf-pane').classList.toggle('pending', !ok);
+  // performance: the series with engine numbers (your scan; a band's typical player always has them)
+  const perfSeries = series.filter(s => hasPerf(s.vals)), mine = hasPerf(you.vals);
+  slot(el, 'perf-pane').classList.toggle('pending', !mine);
   const sub = slot(el, 'perf-sub');
-  if (ok) { sub.textContent = ''; shapePane(el, 'perfRadar', 'perf-bars', PERF_RADAR, you, other, 'rating'); }
-  else {
+  if (mine) {
+    sub.textContent = notShownPerf.length ? `Not shown until analysed: ${notShownPerf.join(', ')}` : '';
+    shapePane(el, 'perfRadar', 'perf-bars', PERF_RADAR, perfSeries, 'rating');
+  } else {
     slot(el, 'perf-bars').innerHTML = '';
-    if (!mine) sub.textContent = S.scanAgg ? `Scan some ${myTc} games to see this.` : 'Scan your games to see this.';
-    else if (P?.run) sub.textContent = `Analyzing ${P.data.label}'s games: ${P.run.done} of ${P.run.n}…`;
-    else sub.innerHTML = `<button class="btn small-btn primary cmp-an">Analyze ${esc(P.data.label)}'s ${theirTc} games</button> <span class="muted small">25 games</span>`;
+    sub.textContent = S.scanAgg ? `Scan some ${myTc} games to see this.` : 'Scan your games to see this.';
   }
-  bindShape(el, theirTc);
+  bindShape(el);
 }
 
-function bindShape(el, theirTc) {
+function bindShape(el) {
+  const stack = ladderState.stack || [], at = e => stack[+e.target.closest('[data-sr]').dataset.sr];
   $$('[data-shape-view]', el).forEach(b => b.onclick = () => { ladderState.view = b.dataset.shapeView; fillShapeCard(el); });
-  $$('[data-cmode]', el).forEach(b => b.onclick = () => {
-    if (b.dataset.cmode === 'band') ladderState.cmp = null;
-    else ladderState.cmp ||= { user: '' };
-    fillShapeCard(el).then(() => { if (ladderState.cmp && !cmpPlayer()) $('.cmp-user', el)?.focus(); });
-  });
-  const band = $('#shapeBand', el);
-  if (band) band.onchange = e => { ladderState.band = +e.target.value; fillShapeCard(el); };
-  const mytc = $('.cmp-mytc', el), theirtc = $('.cmp-theirtc', el);
-  if (mytc) mytc.onchange = e => { ladderState.cmpMyTc = e.target.value; fillShapeCard(el); };
-  if (theirtc) theirtc.onchange = e => { ladderState.cmpTheirTc = e.target.value; fillShapeCard(el); };
-  const input = $('.cmp-user', el), go = () => { ladderState.cmpTheirTc = null; loadCmp(el, input.value); };
-  if (input) { $('.cmp-go', el).onclick = go; input.onkeydown = e => { if (e.key === 'Enter') go(); }; }
-  const an = $('.cmp-an', el);
-  if (an) an.onclick = () => analyzeCmp(el, theirTc);
-  const P = cmpPlayer();
-  if (P) $$('[data-cg]', el).forEach(tr => tr.onclick = () => openReview(cmpGames(P)[+tr.dataset.cg]));
+  $('.sr-mytc', el)?.addEventListener('change', e => { ladderState.myTc = e.target.value; fillShapeCard(el); });
+  $$('.sr-x', el).forEach(b => b.onclick = () => { stack.splice(+b.dataset.srx, 1); fillShapeCard(el); });
+  $$('.sr-band', el).forEach(s => s.onchange = e => { at(e).band = +e.target.value; fillShapeCard(el); });
+  $$('.sr-tc', el).forEach(s => s.onchange = e => { const it = at(e); it.tc = e.target.value; if (it.kind === 'band') it.band = null; fillShapeCard(el); });
+  $$('.sr-an', el).forEach(b => b.onclick = e => { const it = at(e), n = +e.target.closest('[data-sr]').querySelector('.sr-n').value; it.lastN = n; analyzeStack(el, it, n); });
+  $$('[data-cg]', el).forEach(tr => tr.onclick = () => { const [name, i] = tr.dataset.cg.split('|'); openReview(cmpGames(name)[+i]); });
+  const row = slot(el, 'sr-addrow');
+  $('.sr-add', el)?.addEventListener('click', () => row.classList.toggle('hidden'));
+  // the add row's band list follows its time control
+  $('.ad-tc', row).onchange = async e => {
+    const L = await getLadder(), bands = Object.keys(L.tc[e.target.value].bands).map(Number).sort((a, b) => a - b);
+    $('.ad-band', row).innerHTML = bands.map(b => `<option value="${b}">${bandLabel(b)}</option>`).join('');
+  };
+  $('.ad-band-go', row).onclick = () => { row.classList.add('hidden'); addToStack(el, { kind: 'band', tc: $('.ad-tc', row).value, band: +$('.ad-band', row).value }); };
+  const addUser = () => {
+    const u = $('.ad-user', row).value.trim().toLowerCase();
+    if (!u) return;
+    if (u === (S.username || '').toLowerCase()) { $('.ad-user', row).value = ''; $('.ad-user', row).placeholder = "that's you"; return; }
+    row.classList.add('hidden'); addToStack(el, { kind: 'player', user: u, label: u });
+  };
+  $('.ad-user-go', row).onclick = addUser;
+  $('.ad-user', row).onkeydown = e => { if (e.key === 'Enter') addUser(); };
+  $('.ad-legend-go', row).onclick = () => { const f = FAMOUS.find(x => x.id === $('.ad-legend', row).value); row.classList.add('hidden'); addToStack(el, { kind: 'legend', id: f.id, label: f.name, tc: 'rapid' }); };
 }
 
 // ---------- by rating: the typical player of every band, for any measure ----------

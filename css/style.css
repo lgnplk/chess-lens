@@ -805,3 +805,17 @@ canvas.chart-in { animation: chart-in .16s ease-out; }
 /* Shape: who you compare with, and each side's time control */
 .shape-head .cmp-mode { margin: 4px 0 2px; }
 .shape-pick .tc-sel, .shape-pick .cmp-mytc, .shape-pick .cmp-theirtc { width: auto; }
+
+/* Shape: the stack of radars — you, then chips for each band, player or legend; the add row */
+.shape-series { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 8px; }
+.sr-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); font-size: 13.5px; }
+.sr-chip > i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.sr-chip select { width: auto; padding: 2px 4px; font-size: 13px; }
+.sr-chip .small-btn { padding: 2px 8px; }
+.sr-chip .sr-an-wrap { display: inline-flex; gap: 4px; align-items: center; }
+.sr-x { font: inherit; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
+.sr-x:hover { color: var(--critical); }
+.sr-addrow { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; padding: 10px 12px; margin-bottom: 8px; border: 1px dashed var(--border-strong); border-radius: 6px; font-size: 13.5px; }
+.sr-addrow > span { display: inline-flex; gap: 6px; align-items: center; }
+.sr-addrow select, .sr-addrow input { width: auto; }
+.sr-addrow input { width: 170px; }

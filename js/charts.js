@@ -68,8 +68,9 @@ function scoreBarChart(canvas, rows, { expected = false, color = cssVar('--s1') 
 // Radar ("style shape"): series = [{ label, data, slot, dashed }] on a 0–100 scale
 // rating: values are ratings (0–RATING_MAX), drawn with labelled rings every 1000
 function radarChart(canvas, labels, series, { tooltip, rating = false } = {}) {
-  // a missing value would be drawn at the centre, reading as 0: leave that axis out (tooltips keep the original index)
-  const keep = labels.map((_, i) => i).filter(i => series.every(s => s.data[i] != null));
+  // a missing value would be drawn at the centre, reading as 0: an axis the first series (you) lacks is left out
+  // (tooltips keep the original index); another series missing one value just skips that point
+  const keep = labels.map((_, i) => i).filter(i => series[0]?.data[i] != null);
   if (keep.length >= 3 && keep.length < labels.length) {
     labels = keep.map(i => labels[i]);
     series = series.map(s => ({ ...s, data: keep.map(i => s.data[i]) }));
@@ -82,7 +83,7 @@ function radarChart(canvas, labels, series, { tooltip, rating = false } = {}) {
     type: 'radar',
     data: { labels, datasets: series.map(s => ({
       label: s.label, data: s.data, spanGaps: true,
-      borderColor: s.dashed ? cssVar('--muted') : cssVar(s.slot), borderWidth: s.dashed ? 1.5 : 2.25, borderDash: s.dashed ? [4, 4] : [],
+      borderColor: s.dashed && !s.slot ? cssVar('--muted') : cssVar(s.slot), borderWidth: s.dashed ? 1.5 : 2.25, borderDash: s.dashed ? [4, 4] : [],
       backgroundColor: s.dashed ? 'transparent' : cssVar(s.slot) + '22',
       pointRadius: s.dashed ? 0 : 3, pointHoverRadius: 6, pointBackgroundColor: cssVar(s.slot || '--muted'),
       pointBorderColor: cssVar('--surface'), pointBorderWidth: 1.5,
