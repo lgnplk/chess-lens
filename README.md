@@ -67,8 +67,10 @@ blitz and rapid, built once by `tools/build-ladder.js` (52,462 players) and ship
   by chess.com's published rating distribution (`tools/rating-dist.json`). "Few blunders" and consistency are
   inverted (fewer, smaller swings = outward).
 - **Where it shows.** Insights: the Shape radars (you vs a band's typical player, or a chess.com player with your
-  record against them) and By rating. Style axes are percentiles; the Performance radar is on a rating scale (the
-  rating whose typical player matches each value), after pulling small samples toward the typical player of your band.
+  record against them) and By rating. Both radars place each value by its distance from the median player of its time
+  control, in units of how much players really differ; each axis stretches to its most extreme value, so outliers
+  (a legend's brilliance) stay visible. Performance values are first pulled toward the typical player of the band
+  when the sample is small; tooltips give the value and the rating whose typical player matches it.
 
 Rebuild: run the app from source with `CL_SITE=.. CL_PROFILE=../.ladder-build` (that profile also keeps the
 computer awake and the window at full speed), then in DevTools `await loadScript('tools/build-ladder.js');

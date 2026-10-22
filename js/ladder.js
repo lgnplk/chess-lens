@@ -5,8 +5,8 @@
 // Method (see tools/build-ladder.js): both sides of every sampled game; Stockfish 19 (depth 12, top 3 lines, as the
 // desktop app scans) for the performance numbers; a sliding, trend-corrected rating window around each band;
 // game-to-game noise removed, so a band's median (its typical player) and the percentiles describe players' real
-// levels. Radar axes are percentiles among all chess.com players of that time control: bands weighted by chess.com's
-// published rating distribution (tools/rating-dist.json). Browser-engine (Stockfish 10) scans have their accuracy
+// levels. Radar axes measure distance from the median player of that time control in units of how much players
+// differ (population quantiles: bands weighted by chess.com's published rating distribution, tools/rating-dist.json). Browser-engine (Stockfish 10) scans have their accuracy
 // and blunders mapped onto the Stockfish 19 scale (ladder.json calib).
 const LADDER_TCS = ['bullet', 'blitz', 'rapid'];
 const LADDER_BAND = 250, LADDER_MIN_GAMES = 10, LADDER_YOU_GAMES = 100;
@@ -200,11 +200,11 @@ function nearestBand(bands, b) {
 // them green/red (performance) or leaves them neutral (style: different, not better); unit scales the bar
 function divergingBars(rows, goodBad, unit = 1) {
   return rows.map(r => {
-    const w = Math.min(50, Math.abs(r.diff) / unit), up = r.diff >= 0, shown = Math.round(Math.abs(r.diff)).toLocaleString();
+    const w = Math.min(50, Math.abs(r.diff) / unit), up = r.diff >= 0, shown = r.text ?? Math.round(Math.abs(r.diff)).toLocaleString();
     const col = goodBad ? (up ? 'var(--good-text)' : 'var(--critical)') : 'var(--brass)';
     return `<div class="dv-row${r.faded ? ' faded' : ''}" title="${esc(r.tip)}"><span class="dv-lab">${esc(r.label)}</span>
       <div class="dv-trk"><div class="dv-mid"></div><div class="dv-bar" style="background:${col};${up ? 'left' : 'right'}:50%;width:${w}%"></div></div>
-      <span class="dv-val" style="color:${goodBad ? col : 'inherit'}">${shown !== '0' ? (up ? '+' : '−') : ''}${shown}</span></div>`;
+      <span class="dv-val" style="color:${goodBad ? col : 'inherit'}">${r.text ? shown : `${shown !== '0' ? (up ? '+' : '−') : ''}${shown}`}</span></div>`;
   }).join('');
 }
 
@@ -283,27 +283,59 @@ function cmpRecord(item) {
     </tbody></table></div></div>`;
 }
 
-// a radar value: each series on its own time control's ladder. scale: 'pct' (percentile among those players) or
-// 'rating' (the rating whose typical player matches, after pulling small samples toward the series' band)
+// Radar geometry. Each value is placed by how far it sits from the median player of its time control, in units of
+// how much players really differ there (the ladder's population quantiles: median q50, spread (q75 − q25)/1.349;
+// inverted where fewer is better), so a distance on the radar is a real difference in play: not a percentile,
+// which blows up tiny gaps where players bunch together (captures differ by about ±2 per 100 moves), and not a
+// rating, which runs out above the strongest band (Morphy's 62% brilliance). Each axis is then stretched to fit
+// its most extreme value (at least 3 spreads either side): the middle ring is the median player and the rim the
+// stack's extreme on that axis. Performance values are first pulled toward the player's band by the share of
+// their spread that is sampling luck (ladderShrink).
+const RADAR_MIN_SPREADS = 3;
+function spreadOf(q) {
+  const sd = (q[15] - q[5]) / 1.349;
+  return sd > 0 ? sd : (q[18] - q[2]) / 2.563 > 0 ? (q[18] - q[2]) / 2.563 : 1;
+}
 function seriesValue(side, a, scale) {
-  if (scale === 'rating') return ladderRatingOf(side.T, a, ladderShrink(side.T, a, side));
-  const p = ladderPct(side.T.quantiles[a.key], side.vals?.[a.key]);
-  return p == null ? null : a.invert ? 100 - p : p;
+  const q = side.T.quantiles[a.key];
+  const v = scale === 'rating' ? ladderShrink(side.T, a, side) : side.vals?.[a.key];
+  if (!q || v == null) return null;
+  const z = (v - q[10]) / spreadOf(q);
+  return a.invert ? -z : z;
+}
+// "plays like a typical 1,450", or past the strongest band's typical player
+function ratingPhrase(T, a, v) {
+  const pts = ladderCurve(T, a), y = a.invert ? -v : v;
+  if (pts.length < 2) return '';
+  if (y > pts.at(-1)[1]) return 'beyond the strongest band\'s typical player';
+  const r = ladderRatingOf(T, a, v);
+  return r == null ? '' : `plays like a typical ${ratingWord(r)}`;
 }
 
-// one pane: all the series on one radar; the bars compare you with the first of the others
+// one pane: all the series on one radar; the bars compare you with the first of the others, in real units
 function shapePane(el, canvasId, barsCls, axes, series, scale) {
-  const rating = scale === 'rating', pts = series.map(s => axes.map(a => seriesValue(s, a, scale)));
-  const tip = (a, s, r) => valTip(a, s.label, s.vals[a.key]) + (rating && r != null ? ` · plays like a typical ${ratingWord(r)}` : '');
+  const perf = scale === 'rating';
+  const z = series.map(s => axes.map(a => seriesValue(s, a, scale)));
+  const reach = axes.map((_, i) => Math.max(RADAR_MIN_SPREADS, 1.08 * Math.max(0, ...z.map(r => Math.abs(r[i] ?? 0)))));
+  const pts = z.map(r => r.map((x, i) => (x == null ? null : 50 + 50 * x / reach[i])));
+  const tip = (a, s) => {
+    const v = s.vals[a.key];
+    if (v == null) return `${s.label}: –`;
+    const like = perf ? ratingPhrase(s.T, a, ladderShrink(s.T, a, s)) : '';
+    return `${s.label}: ${a.fmt(v)}${like ? ` · ${like}` : ''}`;
+  };
   radarChart($('#' + canvasId, el), axes.map(a => a.label), series.map((s, i) => ({ label: s.label, data: pts[i], slot: s.slot, dashed: s.dashed })),
-    { rating, tooltip: c => tip(axes[c.dataIndex], series[c.datasetIndex], pts[c.datasetIndex][c.dataIndex]) });
-  const [you, other] = series, [yP, oP] = pts;
+    { tooltip: c => tip(axes[c.dataIndex], series[c.datasetIndex]) });
+  const [you, other] = series;
   if (!other) { slot(el, barsCls).innerHTML = ''; return; }
-  const rows = axes.map((a, i) => ({ a, i })).filter(({ i }) => yP[i] != null && oP[i] != null).map(({ a, i }) => ({ label: a.label, diff: yP[i] - oP[i],
-    tip: `${you.label} ${a.fmt(you.vals[a.key])} · ${other.label} ${a.fmt(other.vals[a.key])}${rating ? ' (rating points)' : ' (percentile points)'}`,
-    faded: PERF_KEYS.has(a.key) && (you.n?.[a.key] ?? 99) < 15 }));
-  rows.sort(rating ? (x, y) => y.diff - x.diff : (x, y) => Math.abs(y.diff) - Math.abs(x.diff));
-  slot(el, barsCls).innerHTML = `<div class="muted small" style="margin-bottom:4px">${esc(you.label)} against ${esc(other.label)}</div>` + divergingBars(rows, rating, rating ? 40 : 1);
+  // bar length: the gap in spreads; the number: the gap in the measure's own units
+  const rows = axes.map((a, i) => ({ a, i })).filter(({ i }) => z[0][i] != null && z[1][i] != null).map(({ a, i }) => {
+    const d = you.vals[a.key] - other.vals[a.key];
+    return { label: a.label, diff: (z[0][i] - z[1][i]) * 12.5, text: `${d >= 0 ? '+' : '−'}${a.cell(Math.abs(d)).replace(/^±/, '')}`,
+      tip: `${you.label} ${a.fmt(you.vals[a.key])} · ${other.label} ${a.fmt(other.vals[a.key])}`, faded: PERF_KEYS.has(a.key) && (you.n?.[a.key] ?? 99) < 15 };
+  });
+  rows.sort(perf ? (x, y) => y.diff - x.diff : (x, y) => Math.abs(y.diff) - Math.abs(x.diff));
+  slot(el, barsCls).innerHTML = `<div class="muted small" style="margin-bottom:4px">${esc(you.label)} against ${esc(other.label)}</div>` + divergingBars(rows, perf);
 }
 
 const tcSelect = (cls, tcs, cur, attrs = '') => `<select class="${cls}" ${attrs}>${tcs.map(tc => `<option value="${tc}" ${tc === cur ? 'selected' : ''}>${tcTitle(tc)}</option>`).join('')}</select>`;
@@ -313,14 +345,14 @@ const SHAPE_BODY = `<div class="grid cols-2 shape-grid">
       <span class="pane-title">Style</span>
       <div class="chart-box radar shape-radar"><canvas id="shapeRadar"></canvas></div>
       <div class="shape-bars style-bars"></div>
-      <div class="muted small pane-note">Percentile among players · differences, not scores</div>
+      <div class="muted small pane-note">Middle ring: the median player · differences, not scores</div>
     </div>
     <div class="shape-pane perf-pane">
       <span class="pane-title">Performance</span>
       <div class="sub perf-sub"></div>
       <div class="chart-box radar shape-radar perf-radar"><canvas id="perfRadar"></canvas></div>
       <div class="shape-bars perf-bars"></div>
-      <div class="muted small pane-note perf-note">Rating whose typical player matches · outward is better</div>
+      <div class="muted small pane-note perf-note">Middle ring: the median player · outward is better</div>
     </div>
   </div>`;
 
