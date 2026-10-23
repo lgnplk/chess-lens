@@ -200,7 +200,7 @@ function plDraw() {
   const state = { fen: c.fen(), orientation, lastMove: last && { from: last.from, to: last.to }, arrows: [] };
   if (mark) state.badge = { sq: mark.to, cls: mark.cls, text: CLS[mark.cls].sym };
   // the reply your mistake allows, in red, while the game waits
-  if (pl.hold && mark?.evalAfter?.best && pl.idx === pl.line.length) state.arrows.push({ from: mark.evalAfter.best.slice(0, 2), to: mark.evalAfter.best.slice(2, 4), color: cssVar('--bad'), width: 0.18 });
+  if (pl.hold && mark?.evalAfter?.best && pl.idx === pl.line.length) state.arrows.push({ from: mark.evalAfter.best.slice(0, 2), to: mark.evalAfter.best.slice(2, 4), color: cssVar('--critical'), width: 0.18 });
   pl.board.set(state);
   if (pl.hint && pl.idx === pl.line.length) {
     pl.pre?.p.then(e => {

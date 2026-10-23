@@ -383,6 +383,7 @@ function drawEvalChart() {
 function navReview(cmd) {
   const v = review.variation;
   const n = review.fens.length - 1;
+  if (cmd === 'editor') return openInEditor(curFen());
   if (cmd === 'flip') review.orientation = review.orientation === 'white' ? 'black' : 'white';
   else if (v) {
     if (cmd === 'prev') { if (v.idx > 1) v.idx--; else { exitVariation(); return; } }

@@ -72,6 +72,7 @@ class BoardView {
   // square to move, anywhere else and it glides back; or click the piece, then the square. Clicking a selected
   // piece again lets it go. Right-drag draws an arrow, right-click a circle (shift: red); any left click clears them.
   down(e) {
+    if (this.edit) return this.editDown(e);
     if (e.button === 2) { this.drawFrom = this.squareAt(e); return; }
     if (e.button !== 0) return;
     if (this.drawn.arrows.length || this.drawn.circles.length) { this.drawn = { arrows: [], circles: [] }; this.render(); }
@@ -104,7 +105,51 @@ class BoardView {
     this.drag.ghost.style.transform = `translate(${x}px, ${y}px) scale(1.12)`;
   }
 
+  // Board editor (this.edit = { tool(), place(sq, piece|null), move(from, to) }): with the hand tool any piece can be
+  // dragged anywhere, and dropping it off the board removes it; with a piece or the eraser, pressing and sweeping
+  // over squares sets them. Right-click always clears a square.
+  editDown(e) {
+    const sq = this.squareAt(e);
+    if (!sq) return;
+    if (e.button === 2) { this.edit.place(sq, null); return; }
+    if (e.button !== 0) return;
+    const tool = this.edit.tool();
+    if (tool !== 'hand') {
+      this.edit.place(sq, tool === 'erase' ? null : tool);
+      this.paint = { tool, last: sq };
+      this.el.setPointerCapture(e.pointerId);
+      return;
+    }
+    const img = this.el.querySelector(`[data-sq="${sq}"] img`);
+    if (!img) return;
+    const ghost = img.cloneNode();
+    ghost.className = 'ghost';
+    ghost.style.width = ghost.style.height = (this.el.clientWidth / 8) + 'px';
+    this.el.appendChild(ghost);
+    this.drag = { from: sq, ghost, moved: false, x: e.clientX, y: e.clientY, over: sq, edit: true };
+    this.positionGhost(e);
+    this.el.classList.add('dragging');
+    this.el.setPointerCapture(e.pointerId);
+    this.render();
+  }
+
   move(e) {
+    if (this.paint) {
+      const sq = this.squareAt(e);
+      if (sq && sq !== this.paint.last) { this.paint.last = sq; this.edit.place(sq, this.paint.tool === 'erase' ? null : this.paint.tool); }
+      return;
+    }
+    if (this.drag?.edit) {
+      if (Math.hypot(e.clientX - this.drag.x, e.clientY - this.drag.y) > 3) this.drag.moved = true;
+      this.positionGhost(e);
+      const over = this.squareAt(e);
+      if (over !== this.drag.over) {
+        this.el.querySelector('.sq.over')?.classList.remove('over');
+        if (over) this.el.querySelector(`[data-sq="${over}"]`)?.classList.add('over');
+        this.drag.over = over;
+      }
+      return;
+    }
     if (!this.drag) return;
     if (Math.hypot(e.clientX - this.drag.x, e.clientY - this.drag.y) > 3) this.drag.moved = true;
     this.positionGhost(e);
@@ -129,6 +174,16 @@ class BoardView {
         this.render();
       }
       return;
+    }
+    if (this.paint) { this.paint = null; return; }
+    if (this.drag?.edit) {
+      const { from, moved } = this.drag, to = this.squareAt(e);
+      this.cancelDrag();
+      if (!moved) return this.render();
+      if (!to) return this.edit.place(from, null);
+      if (to === from) return this.render();
+      this.dropped = { from, to };
+      return this.edit.move(from, to);
     }
     if (!this.drag) return;
     const { from, moved, wasSelected, gx, gy, ghost } = this.drag;
@@ -220,7 +275,7 @@ class BoardView {
         if (dests.has(sq)) inner += `<span class="${dests.get(sq) ? 'cap' : 'dot'}"></span>`;
         if (badge && badge.sq === sq) inner += `<span class="badge cls-${badge.cls}" title="${CLS[badge.cls]?.label || ''}">${badge.text}</span>`;
         const cls = ['sq', light ? 'l' : 'd'];
-        if (p && this.onMove && (p === p.toUpperCase() ? 'w' : 'b') === fen.split(' ')[1]) cls.push('mov');
+        if (p && (this.edit ? this.edit.tool() === 'hand' : this.onMove && (p === p.toUpperCase() ? 'w' : 'b') === fen.split(' ')[1])) cls.push('mov');
         if (hl.has(sq)) cls.push('hl');
         if (sq === this.selected) cls.push('sel');
         html += `<div class="${cls.join(' ')}" data-sq="${sq}">${inner}</div>`;

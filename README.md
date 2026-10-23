@@ -44,9 +44,9 @@ Mentor doesn't allow browser cross-origin requests; the app's server does the sa
 ## Navigation
 
 Five sections: **Overview** (Summary with current ratings, Analytics, Report), **Games** (Games, Review, Explorer,
-Openings, Prepare), **Insights** (one page: the engine scan, style and shape, accuracy, blunders, and the ladder by
+Editor, Openings, Prepare), **Insights** (one page: the engine scan, style and shape, accuracy, blunders, and the ladder by
 rating), **Train** (Puzzles, Drills, Openings) and **Bots** (Play, Your bot, Arena). Without loading a player
-("Play the legends" or "Solve puzzles" on the welcome page) Review, Explorer, Train, Play and Arena still work.
+("Play the legends" or "Solve puzzles" on the welcome page) Review, Explorer, Train, Play Arena and the Editor still work.
 Copy is kept to a minimum.
 
 ## Training
@@ -69,6 +69,12 @@ Copy is kept to a minimum.
   player at that rating makes them (the blunder check below). With the **coach** on, Stockfish grades each of your
   moves as Review does, explains it, and stops the game on a mistake or blunder (the reply it allows drawn in red) so
   you can take it back or play on. Hints circle the piece, then show the move. Finished games open in Review.
+- **Board editor** (`js/editor.js`, under Games; ✎ in Review opens the current position there): drag pieces
+  anywhere, paint them from the palette (drag one off the board, or right-click a square, to clear it), set the side
+  to move and castling, paste or copy a FEN, then play moves from it. **Show … move** asks Stockfish (top 5 lines),
+  Maia at any rating, a legend, your arena bots, the Your bot tab's bot, or a new bot built from any player's games
+  (saved with your arena bots) what it would play: each answer is a card with its odds and arrows on the board, so
+  several can be compared on one position.
 - **Review settings** (Review › Report): review depth (up to 22 on the desktop app), number of engine lines (1–5),
   live depth (up to unlimited), and whether the board shows best-move arrows, move badges and the eval bar.
 
@@ -136,6 +142,7 @@ Maia-3 is AGPL-3.0: if you give the app to other people, offer them the source (
 | `js/famous-profiles.json` | The legends' precomputed fingerprints (counts from their classical games) |
 | `js/puzzles.js`, `js/drills.js`, `js/learn.js` | Train: puzzles and Puzzle Rush, endgame drills, opening practice |
 | `js/explorer.js` | Opening explorer: master games (`js/explorer-masters.json`) or your own |
+| `js/editor.js` | Board editor: set up any position and ask Stockfish or any bot for its move |
 | `js/play.js` | Play a bot at any rating, a legend or your bots, with the coach |
 | `js/book.json` | Opening book (positions → ECO/name), built by `node tools/build-book.js` from lichess chess-openings |
 
