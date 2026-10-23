@@ -38,7 +38,7 @@
       <div class="overline">Chess.com game analysis</div>
       <h1>A statistical read on how you play.</h1>
       <p class="lede">Enter a chess.com username above. Engine-checked accuracy and blunders, openings and playing style, measured against every rating level.</p>
-      <div class="hero-cta"><button class="btn primary" id="guestArena">Play the legends</button><span class="muted">No account needed.</span></div>
+      <div class="hero-cta"><button class="btn primary" id="guestArena">Play the legends</button><button class="btn" id="guestTrain">Solve puzzles</button><span class="muted">No account needed.</span></div>
     </div>
     <figure class="diagram">
       <div class="diagram-frame"><div class="board" id="heroBoard"></div></div>
@@ -53,6 +53,8 @@
       <div class="feature"><span class="num">IV</span><b>Head to head</b><span>Compare two players, then prepare against a real repertoire.</span></div>
       <div class="feature"><span class="num">V</span><b>Player bots</b><span>Bots built from real players' games, with matches and tournaments.</span></div>
       <div class="feature"><span class="num">VI</span><b>Openings and analytics</b><span>Results by opening and colour, time trouble, tilt, and opponent strength.</span></div>
+      <div class="feature"><span class="num">VII</span><b>Puzzles and drills</b><span>Rated puzzles, Puzzle Rush, endgames against Stockfish, and opening practice.</span></div>
+      <div class="feature"><span class="num">VIII</span><b>Opening explorer</b><span>Every move from 434,000 master games, and from your own.</span></div>
     </div>
   </div>
 </section>
@@ -77,6 +79,7 @@
     <button data-sec="overview" class="active">Overview</button>
     <button data-sec="games">Games</button>
     <button data-sec="insights">Insights</button>
+    <button data-sec="train">Train</button>
     <button data-sec="bots">Bots</button>
   </nav>
   <nav class="subtabs" id="subtabs"></nav>
@@ -115,9 +118,14 @@
           <div id="keyMoments"></div>
           <h3 style="margin-top:16px">Settings</h3>
           <div class="rv-settings">
-            <label>Review depth <select id="reviewDepth"><option value="12">12 (fast)</option><option value="14" selected>14</option><option value="16">16</option><option value="18">18 (slow)</option></select></label>
+            <label>Review depth <select id="reviewDepth"><option value="12">12 (fast)</option><option value="14" selected>14</option><option value="16">16</option><option value="18">18</option><option value="20" class="native-only">20</option><option value="22" class="native-only">22 (slow)</option></select></label>
             <button class="btn" id="analyzeBtn">Re-analyze</button>
             <label><input type="checkbox" id="liveToggle"> Live engine lines</label>
+            <label>Lines <select id="rvLines"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+            <label>Live depth <select id="rvLiveDepth"><option value="18">18</option><option value="22">22</option><option value="26">26</option><option value="32">32</option><option value="60">Unlimited</option></select></label>
+            <label><input type="checkbox" id="rvArrows"> Best-move arrows</label>
+            <label><input type="checkbox" id="rvBadges"> Move badges</label>
+            <label><input type="checkbox" id="rvEvalBar"> Eval bar</label>
           </div>
           <details style="margin-top:12px">
             <summary>Load a PGN</summary>
@@ -132,7 +140,11 @@
   <section class="tab hidden" id="tab-insights"></section>
   <section class="tab hidden" id="tab-analytics"></section>
   <section class="tab hidden" id="tab-learn"></section>
+  <section class="tab hidden" id="tab-puzzles"></section>
+  <section class="tab hidden" id="tab-explorer"></section>
+  <section class="tab hidden" id="tab-drills"></section>
   <section class="tab hidden" id="tab-prepare"></section>
+  <section class="tab hidden" id="tab-play"></section>
   <section class="tab hidden" id="tab-bot"></section>
   <section class="tab hidden" id="tab-arena"></section>
   <section class="tab hidden" id="tab-report"></section>
@@ -157,6 +169,9 @@
 <script src="js/tree.js"></script>
 <script src="js/prepare.js"></script>
 <script src="js/learn.js"></script>
+<script src="js/puzzles.js"></script>
+<script src="js/explorer.js"></script>
+<script src="js/drills.js"></script>
 <script src="js/maia.js"></script>
 <script src="js/bot.js"></script>
 <script src="js/fidelity.js"></script>
@@ -165,6 +180,7 @@
 <script src="js/botview.js"></script>
 <script src="js/match.js"></script>
 <script src="js/arena.js"></script>
+<script src="js/play.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

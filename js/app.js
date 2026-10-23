@@ -3,22 +3,23 @@ const S = { username: null, player: null, games: [], filtered: [], months: 3, ta
 
 const RENDERERS = {
   overview: renderOverview, games: renderGames, openings: renderOpenings, playstyle: renderPlaystyle,
-  analytics: renderAnalytics, insights: renderInsights, prepare: renderPrepare, learn: renderLearn, bot: renderBot, arena: renderArena, report: renderReport,
+  analytics: renderAnalytics, insights: renderInsights, prepare: renderPrepare, learn: renderLearn, play: renderPlay, puzzles: renderPuzzles, explorer: renderExplorer, drills: renderDrills, bot: renderBot, arena: renderArena, report: renderReport,
 };
 
 // Sections (top row) and their pages (second row)
 const SECTIONS = {
   overview: [['overview', 'Summary'], ['analytics', 'Analytics'], ['report', 'Report']],
-  games: [['games', 'Games'], ['review', 'Review'], ['openings', 'Openings'], ['learn', 'Learn'], ['prepare', 'Prepare']],
+  games: [['games', 'Games'], ['review', 'Review'], ['explorer', 'Explorer'], ['openings', 'Openings'], ['prepare', 'Prepare']],
   insights: [['insights', 'Insights']],
-  bots: [['bot', 'Your bot'], ['arena', 'Arena']],
+  train: [['puzzles', 'Puzzles'], ['drills', 'Drills'], ['learn', 'Openings']],
+  bots: [['play', 'Play'], ['bot', 'Your bot'], ['arena', 'Arena']],
 };
 const sectionOf = tab => Object.keys(SECTIONS).find(k => SECTIONS[k].some(([t]) => t === tab));
 const lastInSection = {};
-// without a loaded player only these pages work
-const GUEST_TABS = ['arena', 'insights', 'review', 'learn'];
+// without a loaded player only these pages work (in this order of preference within a section)
+const GUEST_TABS = ['play', 'arena', 'insights', 'puzzles', 'explorer', 'review', 'learn', 'drills'];
 const firstTab = sec => document.body.classList.contains('guest')
-  ? SECTIONS[sec].map(([t]) => t).find(t => GUEST_TABS.includes(t)) : SECTIONS[sec][0][0];
+  ? GUEST_TABS.find(t => SECTIONS[sec].some(([x]) => x === t)) : SECTIONS[sec][0][0];
 
 function setStatus(msg, isError = false) {
   const s = $('#status');
@@ -128,16 +129,18 @@ function initTheme() {
   });
 }
 
-// Welcome page: Morphy's Opera Game final position, and a way into the arena without loading anyone
+// Welcome page: Morphy's Opera Game final position, and a way into the arena or the puzzles without loading anyone
 function initWelcome() {
   new BoardView($('#heroBoard')).set({ fen: '1n1Rkb1r/p4ppp/4q3/4p1B1/4P3/8/PPP2PPP/2K5 b k - 1 17', orientation: 'white', lastMove: { from: 'd1', to: 'd8' } });
 
-  $('#guestArena').onclick = () => {
+  const guest = tab => {
     document.body.classList.add('guest');
     $('#welcome').classList.add('hidden');
     $('#app').classList.remove('hidden');
-    switchTab('arena');
+    switchTab(tab);
   };
+  $('#guestArena').onclick = () => guest('arena');
+  $('#guestTrain').onclick = () => guest('puzzles');
 }
 
 function initSound() {

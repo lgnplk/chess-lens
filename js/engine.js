@@ -157,6 +157,7 @@ function resetEnginePool() { _pool.forEach(e => e.terminate()); _pool = []; _apo
 // is on screen, and abandons the old search as soon as the position changes.
 class LiveEngine {
   constructor(multipv = 3) {
+    this.multipv = multipv;
     this.worker = spawnStockfish(true);
     this.worker.onmessage = e => this.onLine(String(e.data));
     this.searching = false;

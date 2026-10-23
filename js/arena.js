@@ -37,16 +37,22 @@ function sourceText(src, nGames) {
   return `${where}${tc}${n}`;
 }
 
-// Build (or reuse) a bot. Each bot in a game is its own instance: shared model, own name/mode/blunder counters.
-async function ensureBot(id, onStatus) {
-  const r = botInfo(id);
-  if (!r) throw new Error('Unknown bot');
+// One Maia pool for every bot here and on the Play page
+async function arenaMaia(onStatus) {
   const size = arenaSize();
   if (!arena.maia || arena.maia.size !== size) {
     arena.maia?.terminate(); arena.models.clear();
     onStatus?.(`Loading Maia-3 ${size.toUpperCase()}…`);
     arena.maia = await openMaia(size);
   }
+  return arena.maia;
+}
+
+// Build (or reuse) a bot. Each bot in a game is its own instance: shared model, own name/mode/blunder counters.
+async function ensureBot(id, onStatus) {
+  const r = botInfo(id);
+  if (!r) throw new Error('Unknown bot');
+  const { size } = await arenaMaia(onStatus);
   const fid = r.fid !== 'standard';
   const key = JSON.stringify([r.src, r.nGames || 80, fid]);
   if (!arena.models.has(key)) {

@@ -3,6 +3,8 @@ const review = {
   game: null, fens: [], moves: [], analysis: null, ply: 0, orientation: 'white', busy: false, token: 0,
   variation: null,           // { base, fens: [...], moves: [...], idx }
   live: null, liveLines: [], liveFen: null, liveOn: store.get('cl:liveOn', true), sub: 'analysis',
+  // analysis settings (Settings, under Report): engine lines, live depth, review depth, what the board shows
+  opts: { lines: 3, liveDepth: 22, depth: 14, arrows: true, badges: true, evalBar: true, ...store.get('cl:rvOpts', {}) },
 };
 let boardView = null;
 
@@ -97,7 +99,7 @@ function drawReview() {
   const opts = { fen, orientation: review.orientation, lastMove: curLastMove(), arrows: [] };
   if (!v && a) {
     const mv = p > 0 ? a.moves[p - 1] : null;
-    if (mv) opts.badge = { sq: mv.to, cls: mv.cls, text: CLS[mv.cls].sym };
+    if (mv && review.opts.badges) opts.badge = { sq: mv.to, cls: mv.cls, text: CLS[mv.cls].sym };
     if (mv && ERROR_CLS.has(mv.cls) && mv.best) opts.arrows.push({ from: mv.best.slice(0, 2), to: mv.best.slice(2, 4), color: cssVar('--good') });
     else if (a.evals[p]?.best) opts.arrows.push({ from: a.evals[p].best.slice(0, 2), to: a.evals[p].best.slice(2, 4), color: cssVar('--s1'), opacity: 0.7 });
     setEvalBar(a.evals[p]);
@@ -106,6 +108,7 @@ function drawReview() {
     opts.arrows.push({ from: l.best.slice(0, 2), to: l.best.slice(2, 4), color: cssVar('--s1'), opacity: 0.7 });
     setEvalBar(l);
   } else setEvalBar(null);
+  if (!review.opts.arrows) opts.arrows = [];
   boardView.set(opts);
   drawPlayers(fen);
   $$('#moveList .mv').forEach(e => e.classList.toggle('cur', !v && +e.dataset.ply === p));
@@ -219,10 +222,10 @@ function startLive() {
     return;
   }
   if (review.liveFen === fen && review.liveLines.length) { renderLiveLines(); return; }
-  if (!review.live) review.live = new LiveEngine(3);
+  if (review.live?.multipv !== review.opts.lines) { review.live?.terminate(); review.live = new LiveEngine(review.opts.lines); }
   review.liveFen = fen; review.liveLines = [];
   box.innerHTML = '<div class="muted small">Thinking…</div>';
-  review.live.start(fen, 22, (lines) => {
+  review.live.start(fen, review.opts.liveDepth, (lines) => {
     if (review.liveFen !== fen) return;
     review.liveLines = lines;
     if (!review._liveRaf) review._liveRaf = requestAnimationFrame(() => {
@@ -239,7 +242,7 @@ function startLive() {
 function renderLiveLines() {
   const fen = review.liveFen, lines = review.liveLines;
   if (!lines.length) return;
-  $('#engineLines').innerHTML = `<div class="lines-head muted small">Stockfish 10 · depth ${lines[0].depth}</div>` + lines.map((l, i) => {
+  $('#engineLines').innerHTML = `<div class="lines-head muted small">Stockfish ${NATIVE_SF ? 19 : 10} · depth ${lines[0].depth}</div>` + lines.map((l, i) => {
     const sans = pvToSan(fen, l.pv, 10);
     const toks = fmtLine(fen, sans).split(' ');
     const cp = evalToCp(l);
@@ -410,6 +413,21 @@ function initReview() {
   const lt = $('#liveToggle');
   lt.checked = review.liveOn;
   lt.addEventListener('change', () => { review.liveOn = lt.checked; store.set('cl:liveOn', lt.checked); review.liveFen = null; startLive(); });
+  if (!NATIVE_SF) $$('#reviewDepth .native-only').forEach(o => o.remove());
+  const o = review.opts, saveOpts = () => store.set('cl:rvOpts', o);
+  const bindOpt = (sel, key, after, num = true) => {
+    const el = $(sel);
+    if (el.type === 'checkbox') el.checked = o[key]; else el.value = String(o[key]);
+    if (!el.value && el.type !== 'checkbox') el.value = el.options[0].value;   // a saved depth this engine doesn't offer
+    el.addEventListener('change', () => { o[key] = el.type === 'checkbox' ? el.checked : num ? +el.value : el.value; saveOpts(); after?.(); });
+  };
+  bindOpt('#reviewDepth', 'depth');
+  bindOpt('#rvLines', 'lines', () => { review.liveFen = null; startLive(); });
+  bindOpt('#rvLiveDepth', 'liveDepth', () => { review.liveFen = null; startLive(); });
+  bindOpt('#rvArrows', 'arrows', drawReview);
+  bindOpt('#rvBadges', 'badges', drawReview);
+  bindOpt('#rvEvalBar', 'evalBar', () => { $('#evalbar').style.visibility = o.evalBar ? '' : 'hidden'; });
+  $('#evalbar').style.visibility = o.evalBar ? '' : 'hidden';
   $('#pgnLoad').addEventListener('click', () => {
     const pgn = $('#pgnInput').value.trim();
     if (!pgn) return;

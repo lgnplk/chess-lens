@@ -4,6 +4,8 @@ A desktop chess.com game analyzer: Stockfish game review with verified brilliant
 colour, a style fingerprint compared with world champions, advanced analytics and highlights, a rating ladder of the
 typical player at every level, head-to-head comparisons, opening preparation against any player, bots that play like
 real people (including 16 legends), bot matches and tournaments with predictions, and a strengths & weaknesses report.
+Training too: rated puzzles and Puzzle Rush, endgame drills against Stockfish, opening practice, a master-games opening
+explorer, and games against a bot at any rating with a coach.
 
 ## Desktop app (Windows)
 
@@ -41,9 +43,34 @@ Mentor doesn't allow browser cross-origin requests; the app's server does the sa
 
 ## Navigation
 
-Four sections: **Overview** (Summary with current ratings, Analytics, Report), **Games** (Games, Review,
-Openings, Learn, Prepare), **Insights** (one page: the engine scan, style and shape, accuracy, blunders, and the ladder by
-rating) and **Bots** (Your bot, Arena). Copy is kept to a minimum.
+Five sections: **Overview** (Summary with current ratings, Analytics, Report), **Games** (Games, Review, Explorer,
+Openings, Prepare), **Insights** (one page: the engine scan, style and shape, accuracy, blunders, and the ladder by
+rating), **Train** (Puzzles, Drills, Openings) and **Bots** (Play, Your bot, Arena). Without loading a player
+("Play the legends" or "Solve puzzles" on the welcome page) Review, Explorer, Train, Play and Arena still work.
+Copy is kept to a minimum.
+
+## Training
+
+- **Puzzles** (`js/puzzles.js`): 37,892 puzzles from lichess's public-domain puzzle database
+  (`js/puzzles.json`, built by `node tools/build-puzzles.js`: 500+ plays, popularity 80+, settled rating, up to
+  1,600 drawn at random from every 100-point band from 400 to 2900). **Rated** keeps an Elo puzzle rating on this
+  computer and serves puzzles near it, by theme if you like; **Puzzle Rush** (3 or 5 minutes, or untimed Survival)
+  gets harder as you go and ends on the third mistake. Any checkmate counts as a solution.
+- **Drills** (`js/drills.js`): the basic mates (queen, rook, two rooks, two bishops) and key endgames (opposition,
+  queen against a pawn, Lucena, Philidor) played out against Stockfish at full strength. Every position was checked
+  at depth 30; after each of your moves the engine checks that the win (or the draw) is still there, so a slip ends
+  the drill at once.
+- **Openings** (`js/learn.js`): practise a line move by move; a wrong move slides back with the book move shown.
+- **Explorer** (`js/explorer.js`, under Games): from any position, the moves played and how they scored, from
+  434,770 over-the-board master games (`js/explorer-masters.json`, first 10 moves, positions in 5+ games; built by
+  `node --max-old-space-size=12000 tools/build-explorer.js` from PGN Mentor's player files) or from your own games.
+- **Play** (`js/play.js`, under Bots): a game against Maia-3 set to any chess.com rating from 400 to 2600, a
+  legend, or one of your arena bots. The rating bot keeps 20+ win-% blunders to the rate the ladder's typical rapid
+  player at that rating makes them (the blunder check below). With the **coach** on, Stockfish grades each of your
+  moves as Review does, explains it, and stops the game on a mistake or blunder (the reply it allows drawn in red) so
+  you can take it back or play on. Hints circle the piece, then show the move. Finished games open in Review.
+- **Review settings** (Review › Report): review depth (up to 22 on the desktop app), number of engine lines (1–5),
+  live depth (up to unlimited), and whether the board shows best-move arrows, move badges and the eval bar.
 
 ## Rating ladder
 
@@ -107,6 +134,9 @@ Maia-3 is AGPL-3.0: if you give the app to other people, offer them the source (
 | `js/famous.js` | The 16 legends (PGN Mentor files, fallback ratings, one-line notes) and monogram avatars |
 | `js/style.js` | Style fingerprint: traits vs your own opponents, titles, closest famous player |
 | `js/famous-profiles.json` | The legends' precomputed fingerprints (counts from their classical games) |
+| `js/puzzles.js`, `js/drills.js`, `js/learn.js` | Train: puzzles and Puzzle Rush, endgame drills, opening practice |
+| `js/explorer.js` | Opening explorer: master games (`js/explorer-masters.json`) or your own |
+| `js/play.js` | Play a bot at any rating, a legend or your bots, with the coach |
 | `js/book.json` | Opening book (positions → ECO/name), built by `node tools/build-book.js` from lichess chess-openings |
 
 Engine evaluations are cached in IndexedDB (room for thousands of games), so re-opening a game or re-running a
@@ -330,7 +360,7 @@ fidelity. The sampling and blunder-check rules below apply to Standard bots.
 - **Blunder check:** Maia picks moves by pattern without calculating, so a strong player's bot could play a
   natural-looking move that hangs the queen. Every Maia move gets a quick Stockfish check (depth 8); a move losing
   40+ win-% points (roughly a piece or worse) is kept only as often as the player really makes such blunders,
-  measured on up to 30 of their own games in the same time control. Applies in the Bot arena and when you play a Player bot.
+  measured on up to 30 of their own games in the same time control. Applies in the Bot arena, on Play and when you play a Player bot.
 - **Resignation:** when Maia's position-based estimate stays under 5% for three of its moves *and*, allowing for the
   rating gap, the bot is still not favored — a GM down a queen against a beginner plays on. Games stop at 150 moves.
 - **Time control matters:** a bot built from someone's bullet games blunders like they do in bullet. Pick their rapid

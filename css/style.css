@@ -578,8 +578,9 @@ tbody tr:hover { background: color-mix(in srgb, var(--surface-2) 65%, transparen
 .hl-value { font-family: var(--serif); font-size: 30px; font-weight: 600; line-height: 1.1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: lining-nums; }
 .hl-detail { color: var(--ink-2); font-size: 12.5px; }
 
-/* guest mode: arena (and review of its games) without loading a player */
-.guest #filters, .guest #tabs button:not([data-sec="bots"]):not([data-sec="insights"]), .guest #subtabs button:not([data-tab="arena"]):not([data-tab="ladder"]):not([data-tab="review"]) { display: none; }
+/* guest mode: arena (and review of its games), training and the explorer without loading a player */
+.guest #filters, .guest #tabs button[data-sec="overview"],
+.guest #subtabs button:not([data-tab="play"]):not([data-tab="arena"]):not([data-tab="insights"]):not([data-tab="review"]):not([data-tab="explorer"]):not([data-tab="puzzles"]):not([data-tab="drills"]):not([data-tab="learn"]) { display: none; }
 
 /* ---------- twin test ---------- */
 .twin-stage { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 24px; margin-top: 18px; align-items: start; }
@@ -819,3 +820,26 @@ canvas.chart-in { animation: chart-in .16s ease-out; }
 .sr-addrow > span { display: inline-flex; gap: 6px; align-items: center; }
 .sr-addrow select, .sr-addrow input { width: auto; }
 .sr-addrow input { width: 170px; }
+
+/* Puzzle Rush: score, clock and strikes */
+.pz-rush { display: flex; align-items: baseline; gap: 18px; margin: 4px 0 10px; }
+.pz-score { font-family: var(--serif); font-size: 44px; font-weight: 600; line-height: 1; }
+.pz-clock { font-size: 26px; font-variant-numeric: tabular-nums; }
+.pz-strike { color: var(--border-strong); font-weight: 800; font-size: 20px; margin-right: 4px; }
+.pz-strike.on { color: var(--critical); }
+
+/* Opening explorer */
+.ex-table { width: 100%; }
+.ex-table td, .ex-table th { padding: 6px 6px; }
+.ex-bar { display: flex; height: 18px; min-width: 160px; border-radius: 2px; overflow: hidden; font-size: 11px; line-height: 18px; font-variant-numeric: tabular-nums; }
+.ex-bar > div { text-align: center; overflow: hidden; white-space: nowrap; }
+.ex-bar .w { background: #f2efe8; color: #222; }
+.ex-bar .d { background: #9a958c; color: #fff; }
+.ex-bar .b { background: #2b2925; color: #eee; }
+.ex-total td { border-top: 1px solid var(--border-strong); color: var(--ink-2); }
+
+/* Drills */
+.dr-list { display: flex; flex-wrap: wrap; gap: 14px 24px; margin-top: 12px; }
+.dr-group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.dr-group .sub { flex-basis: 100%; margin: 0; }
+.learn-chip.active { border-color: var(--brass); }

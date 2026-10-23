@@ -302,12 +302,13 @@ async function guardMove(bot, fen, pick, pool, engine) {
   const best = await engine.analyse(fen, GUARD_DEPTH, 1500, 1);
   const wpBest = wp(best);
   const lossOf = async m => m.uci === best.best ? 0 : wpBest - wp(await engine.analyse(fen, GUARD_DEPTH, 1500, 1, m.uci));
+  const lim = bot.guardLoss ?? BLUNDER_LOSS;   // the Play page's rating bots guard 20+ point blunders (the ladder's measure)
   g.moves++;
-  if (await lossOf(pick) < BLUNDER_LOSS) return pick;
+  if (await lossOf(pick) < lim) return pick;
   g.flagged++;
   const tryRate = (g.flagged + 0.5) / (g.moves + 10); // how often Maia tries to blunder, smoothed
   if (Math.random() < Math.min(1, bot.blunderTarget / tryRate)) { g.kept++; return pick; }
-  for (const m of pool.filter(m => m !== pick).sort((a, b) => b.p - a.p)) if (await lossOf(m) < BLUNDER_LOSS) return m;
+  for (const m of pool.filter(m => m !== pick).sort((a, b) => b.p - a.p)) if (await lossOf(m) < lim) return m;
   const mv = best.best && uciMove(fen, best.best);
   return mv ? { san: mv.san, uci: best.best, p: 0 } : pick;
 }

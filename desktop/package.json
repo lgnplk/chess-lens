@@ -1,7 +1,7 @@
 {
   "name": "chess-lens",
   "productName": "Chess Lens",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "Chess Lens: analysis, playstyle and player bots for chess.com games",
   "author": "gogangoblin",
   "license": "AGPL-3.0-or-later",
