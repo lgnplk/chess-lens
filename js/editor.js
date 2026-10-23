@@ -162,6 +162,7 @@ async function edAsk() {
   const token = ++ed.token, who = ed.who, fens = edFens(), say = m => { ed.status = String(m).replace(/<[^>]+>/g, ''); edDrawStatus(); };
   ed.busy = true; ed.status = ''; edDraw();
   try {
+    if (who === 'sf') say('Stockfish is thinking…');
     const res = who === 'sf' ? await edAskStockfish(fen) : await edAskBot(who, fens, say);
     if (token !== ed.token) return;
     ed.results = ed.results.filter(r => !(r.fen === fen && r.key === res.key));
@@ -176,8 +177,8 @@ async function edAsk() {
 }
 
 async function edAskStockfish(fen) {
-  const depth = NATIVE_SF ? 22 : 15;
-  const r = await ed.engine.analyse(fen, depth, 10000, 5);
+  const depth = NATIVE_SF ? 20 : 15;   // five lines to depth 20 take about 4 s on the desktop engine
+  const r = await ed.engine.analyse(fen, depth, 8000, 5);
   const rows = r.lines.filter(l => l.pv?.length).map(l => ({ san: uciToSan(fen, l.pv[0]), uci: l.pv[0], ev: l }));
   return { key: 'sf', name: 'Stockfish', note: `Stockfish ${NATIVE_SF ? 19 : 10} · depth ${r.lines[0]?.depth || depth} · its top ${rows.length} moves`, rows };
 }

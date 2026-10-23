@@ -396,19 +396,23 @@ function sqXY(sq, flip) {
   return [(flip ? 7 - c : c) + 0.5, (flip ? 7 - r : r) + 0.5];
 }
 
+// Each arrow is a shaft and a triangular head in one group, so the head is drawn with the arrow itself. (SVG markers
+// were looked up by id across the whole page: every board after the first got another board's heads, often from a
+// hidden page, so they went missing or took the wrong colour.) The group's opacity keeps the overlap from darkening.
 function arrowsSvg(arrows, flip, circles = []) {
   if (!arrows.length && !circles.length) return '';
-  let s = `<svg class="arrows" viewBox="0 0 8 8"><defs>`;
-  arrows.forEach((a, i) => {
-    s += `<marker id="ah${i}" markerWidth="3" markerHeight="3" refX="1.6" refY="1.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L3,1.5 L0,3 z" fill="${a.color}"/></marker>`;
-  });
-  s += '</defs>';
-  arrows.forEach((a, i) => {
+  let s = '<svg class="arrows" viewBox="0 0 8 8">';
+  for (const a of arrows) {
+    if (!a.from || !a.to || a.from === a.to) continue;
     const [x1, y1] = sqXY(a.from, flip), [x2, y2] = sqXY(a.to, flip);
-    const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy);
-    const ex = x2 - dx / len * 0.42, ey = y2 - dy / len * 0.42;
-    s += `<line x1="${x1}" y1="${y1}" x2="${ex}" y2="${ey}" stroke="${a.color}" stroke-width="${a.width ?? 0.2}" stroke-linecap="round" opacity="${a.opacity ?? 0.85}" marker-end="url(#ah${i})"/>`;
-  });
+    const w = a.width ?? 0.2, len = Math.hypot(x2 - x1, y2 - y1), ux = (x2 - x1) / len, uy = (y2 - y1) / len;
+    const hl = Math.max(0.34, 3 * w), hw = Math.max(0.17, 1.5 * w);   // head length and half-width
+    const tx = x2 - ux * (0.42 - 1.4 * w), ty = y2 - uy * (0.42 - 1.4 * w);   // tip, short of the square's centre
+    const bx = tx - ux * hl, by = ty - uy * hl;
+    const f = n => +n.toFixed(3);
+    s += `<g opacity="${a.opacity ?? 0.85}"><line x1="${f(x1)}" y1="${f(y1)}" x2="${f(bx)}" y2="${f(by)}" stroke="${a.color}" stroke-width="${w}" stroke-linecap="round"/>`
+      + `<polygon points="${f(tx)},${f(ty)} ${f(bx - uy * hw)},${f(by + ux * hw)} ${f(bx + uy * hw)},${f(by - ux * hw)}" fill="${a.color}"/></g>`;
+  }
   circles.forEach(c => { const [x, y] = sqXY(c.from, flip); s += `<circle cx="${x}" cy="${y}" r="0.44" fill="none" stroke="${c.color}" stroke-width="0.07"/>`; });
   return s + '</svg>';
 }
