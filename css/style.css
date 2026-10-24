@@ -814,6 +814,8 @@ canvas.chart-in { animation: chart-in .16s ease-out; }
 .sr-chip select { width: auto; padding: 2px 4px; font-size: 13px; }
 .sr-chip .small-btn { padding: 2px 8px; }
 .sr-chip .sr-an-wrap { display: inline-flex; gap: 4px; align-items: center; }
+.sr-chip .sr-n { width: 110px; }
+.sr-chip .sr-nv { min-width: 2.2em; font-variant-numeric: tabular-nums; }
 .sr-x { font: inherit; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
 .sr-x:hover { color: var(--critical); }
 .sr-addrow { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; padding: 10px 12px; margin-bottom: 8px; border: 1px dashed var(--border-strong); border-radius: 6px; font-size: 13.5px; }

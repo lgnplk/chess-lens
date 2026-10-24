@@ -104,6 +104,9 @@ blitz and rapid, built once by `tools/build-ladder.js` (52,462 players) and ship
   control, in units of how much players really differ; each axis stretches to its most extreme value, so outliers
   (a legend's brilliance) stay visible. Performance values are first pulled toward the typical player of the band
   when the sample is small; tooltips give the value and the rating whose typical player matches it.
+  A chess.com player can be shown in any time control they have 10+ games in on their account: when the loaded
+  period holds fewer, their latest 100 games of it are fetched month by month back from now. A slider picks how many
+  of their games to analyse (up to all of them, at most 500 per run), fetching more when needed.
 
 Rebuild: run the app from source with `CL_SITE=.. CL_PROFILE=../.ladder-build` (that profile also keeps the
 computer awake and the window at full speed), then in DevTools `await loadScript('tools/build-ladder.js');

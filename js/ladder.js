@@ -215,8 +215,36 @@ function divergingBars(rows, goodBad, unit = 1) {
 // ladderState.stack: [{ kind: 'band', tc, band } | { kind: 'player', user, label, data, tc, agg, aggTc, aggN, run }
 //   | { kind: 'legend', id, label, data, tc, agg, aggN, run }]; null until changed (then: your band's typical player)
 const STACK_MAX = 5, STACK_SLOTS = ['--s2', '--s3', '--s4', '--s5', '--s6'];
-const AN_SIZES = [25, 50, 100, 200];
+// Insights rebuilds its page now and then (a scan finishing, a filter); a download or analysis that finishes later
+// draws on the card on screen, not the one it started from
+const shapeLive = el => (el?.isConnected ? el : $('#shapeCard') || el);
+const AN_MAX = 500;   // the most games one Analyze runs (the slider's top)
 const stackPlayers = () => (ladderState.stack || []).filter(s => s.kind !== 'band' && s.data);
+// how many games a chess.com player has played in a time control, over the whole account (their stats page)
+const acctGames = (it, tc) => { const r = it.data?.player?.stats?.['chess_' + tc]?.record; return r ? (r.win || 0) + (r.loss || 0) + (r.draw || 0) : 0; };
+const stackPool = it => it.data.games.filter(g => (g.plies ?? g.sans.length) >= 10 && (it.kind === 'legend' || g.timeClass === it.tc));
+
+// A player is first loaded for the header's period, which may hold few games (or none) of the time control you
+// pick for them; then their games of that time control are fetched month by month back from now until there are
+// `want` of them (or their account runs out), and merged in.
+function stackFetchTc(el, it, tc, want) {
+  it.fetched ||= {};
+  const have = it.data.games.filter(g => g.timeClass === tc).length, acct = acctGames(it, tc);
+  if (it.kind !== 'player' || (it.fetched[tc] || 0) >= want || have >= want || (acct && have >= acct)) return Promise.resolve();
+  if (it.fetching) return it.fetching.p.then(() => stackFetchTc(el, it, tc, want));
+  const status = m => { it.fetching.msg = String(m).replace(/<[^>]+>/g, ''); const s = $(`[data-sr="${ladderState.stack.indexOf(it)}"] .sr-load`, shapeLive(el)); if (s) s.textContent = it.fetching.msg; };
+  it.fetching = { tc, msg: `loading ${tc} games…` };   // set at once, so the chip being drawn shows it
+  it.fetching.p = (async () => {
+    try {
+      const d = await loadSource({ kind: 'chesscom', user: it.user, tc, recent: want }, status);
+      const seen = new Set(it.data.games.map(g => g.id));
+      it.data = { ...it.data, games: [...it.data.games, ...d.games.filter(g => !seen.has(g.id))].sort((a, b) => b.end - a.end) };
+    } catch (e) { it.fetchErr = e.message || String(e); }
+    it.fetched[tc] = want; it.fetching = null;
+    if (ladderState.stack?.includes(it)) fillShapeCard(el);
+  })();
+  return it.fetching.p;
+}
 let _anQueue = Promise.resolve();   // engine runs one at a time (they share the analysis engines)
 
 async function addToStack(el, item) {
@@ -235,16 +263,19 @@ async function addToStack(el, item) {
 
 // their engine numbers: Stockfish over their latest n games (in the chip's time control; all of a legend's),
 // measured as your scan measures you
-function analyzeStack(el, item, n) {
-  if (item.run || !(n > 0)) return;
-  const pool = item.data.games.filter(g => (g.plies ?? g.sans.length) >= 10 && (item.kind === 'legend' || g.timeClass === item.tc));
-  const list = pool.slice(0, n), results = [];
+async function analyzeStack(el, item, n) {
+  if (item.run || item.fetching || !(n > 0)) return;
+  const more = stackFetchTc(el, item, item.tc, n);   // more of their games of this time control, if the slider asks for more
+  if (item.fetching) fillShapeCard(el);
+  await more;
+  if (item.run || !ladderState.stack?.includes(item)) return;
+  const list = stackPool(item).slice(0, n), results = [];
   item.run = { done: 0, n: list.length, waiting: true };
   fillShapeCard(el);
   _anQueue = _anQueue.then(async () => {
     item.run.waiting = false;
     await analyzeGamesParallel(list, scanState.depth, {
-      onProgress: (f, d) => { item.run.done = d; const s = $(`[data-sr="${ladderState.stack.indexOf(item)}"] .sr-run`, el); if (s) s.textContent = `analyzing ${d} of ${list.length}…`; },
+      onProgress: (f, d) => { item.run.done = d; const s = $(`[data-sr="${ladderState.stack.indexOf(item)}"] .sr-run`, shapeLive(el)); if (s) s.textContent = `analyzing ${d} of ${list.length}…`; },
       onResult: (g, a) => results.push({ game: g, analysis: a }),
     });
     Object.assign(item, { agg: results.length ? aggregateScan(results) : null, aggTc: item.tc, aggN: results.length, run: null });
@@ -359,6 +390,7 @@ const SHAPE_BODY = `<div class="grid cols-2 shape-grid">
 // ---------- "Shape": you and a stack of others, as a Style radar (habits, percentiles) and a Performance radar
 // (from scans, on the rating scale), with a bars view of you against the first of them ----------
 async function fillShapeCard(el) {
+  el = shapeLive(el);
   if (!el) return;
   const L = await getLadder();
   const has = tc => L?.tc[tc] && Object.keys(L.tc[tc].bands).length;
@@ -399,19 +431,30 @@ async function fillShapeCard(el) {
     let m, tcs = tcsAll;
     if (it.kind === 'legend') { it.tc = has(it.tc) ? it.tc : 'rapid'; m = legendMeasure(it); }
     else {
-      tcs = tcsAll.filter(tc => ladderMeasure(it.data.games, tc));
+      // every time control they have 10+ games in on the account, not only in the loaded period
+      const count = tc => Math.max(ladderMeasure(it.data.games, tc)?.games || 0, acctGames(it, tc));
+      tcs = tcsAll.filter(tc => count(tc) >= LADDER_MIN_GAMES);
       if (!tcs.length) { chips.push(`<span class="sr-chip" data-sr="${i}"><i style="background:var(${color})"></i>${name} <span class="muted small">no time control with 10+ rated games</span>${x}</span>`); return; }
-      it.tc = tcs.includes(it.tc) ? it.tc : tcs.includes(myTc) ? myTc : most(tcs, tc => ladderMeasure(it.data.games, tc).games);
+      it.tc = tcs.includes(it.tc) ? it.tc : tcs.includes(myTc) ? myTc : most(tcs, count);
+      // their habits rest on up to 100 recent games of the time control: fetch further back when the period holds fewer
+      if (!it.fetching) stackFetchTc(el, it, it.tc, LADDER_YOU_GAMES);
       m = ladderMeasure(it.data.games, it.tc, it.aggTc === it.tc ? it.agg : null);
+      if (!m) {
+        const why = it.fetching ? `<span class="sr-load">${esc(it.fetching.msg)}</span>` : it.fetchErr ? esc(it.fetchErr) : `fewer than ${LADDER_MIN_GAMES} rated ${it.tc} games`;
+        chips.push(`<span class="sr-chip" data-sr="${i}"><i style="background:var(${color})"></i>${name}${tcSelect('sr-tc', tcs, it.tc)}<span class="muted small">${why}</span>${x}</span>`);
+        return;
+      }
     }
     const label = it.kind === 'legend' ? it.label : it.tc !== myTc ? `${it.label} (${it.tc})` : it.label;
     const s = { ...m, T: L.tc[it.tc], label, slot: color };
     series.push(s);
     if (!hasPerf(s.vals)) notShownPerf.push(label);
-    const avail = it.data.games.filter(g => (g.plies ?? g.sans.length) >= 10 && (it.kind === 'legend' || g.timeClass === it.tc)).length;
-    const sizes = AN_SIZES.filter(n => n <= Math.max(25, avail));
+    // how many to analyse: any number up to all they have in this time control (more are fetched when needed)
+    const avail = stackPool(it).length, top = Math.max(1, Math.min(AN_MAX, it.kind === 'legend' ? avail : Math.max(avail, acctGames(it, it.tc))));
+    const nPick = clamp(it.lastN || 25, 1, top);
     const engine = it.run ? `<span class="muted small sr-run">${it.run.waiting ? 'waiting for the engine…' : `analyzing ${it.run.done} of ${it.run.n}…`}</span>`
-      : `<span class="sr-an-wrap">${it.aggN && it.aggTc === it.tc ? `<span class="muted small">${it.aggN} analysed</span>` : ''}<select class="sr-n">${sizes.map(n => `<option value="${n}" ${n === (it.lastN || 25) ? 'selected' : ''}>${Math.min(n, avail)} games</option>`).join('')}</select><button class="btn small-btn sr-an">${it.aggN && it.aggTc === it.tc ? 'Re-analyze' : 'Analyze'}</button></span>`;
+      : it.fetching ? `<span class="muted small sr-load">${esc(it.fetching.msg)}</span>`
+      : `<span class="sr-an-wrap">${it.aggN && it.aggTc === it.tc ? `<span class="muted small">${it.aggN} analysed</span>` : ''}<input type="range" class="sr-n" min="1" max="${top}" value="${nPick}" title="How many of their latest ${it.kind === 'legend' ? '' : it.tc + ' '}games"><span class="small sr-nv">${nPick}</span><button class="btn small-btn sr-an">${it.aggN && it.aggTc === it.tc ? 'Re-analyze' : 'Analyze'}</button></span>`;
     chips.push(`<span class="sr-chip" data-sr="${i}"><i style="background:var(${color})"></i>${esc(it.label)}${it.kind === 'legend' ? ` <span class="muted small" title="Classical over-the-board games, placed among online players of this time control">classical, as</span>` : ''}${tcSelect('sr-tc', tcs, it.tc)}${engine}${x}</span>`);
   });
   slot(el, 'shape-series').innerHTML = `<span class="sr-chip sr-you"><i style="background:var(--s1)"></i>You${tcSelect('sr-mytc', myTcs, myTc)}</span>
@@ -449,6 +492,7 @@ function bindShape(el) {
   $$('.sr-x', el).forEach(b => b.onclick = () => { stack.splice(+b.dataset.srx, 1); fillShapeCard(el); });
   $$('.sr-band', el).forEach(s => s.onchange = e => { at(e).band = +e.target.value; fillShapeCard(el); });
   $$('.sr-tc', el).forEach(s => s.onchange = e => { const it = at(e); it.tc = e.target.value; if (it.kind === 'band') it.band = null; fillShapeCard(el); });
+  $$('.sr-n', el).forEach(s => s.oninput = e => { const v = +e.target.value; at(e).lastN = v; e.target.nextElementSibling.textContent = v; });
   $$('.sr-an', el).forEach(b => b.onclick = e => { const it = at(e), n = +e.target.closest('[data-sr]').querySelector('.sr-n').value; it.lastN = n; analyzeStack(el, it, n); });
   $$('[data-cg]', el).forEach(tr => tr.onclick = () => { const [name, i] = tr.dataset.cg.split('|'); openReview(cmpGames(name)[+i]); });
   const row = slot(el, 'sr-addrow');
