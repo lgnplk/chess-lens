@@ -1,9 +1,10 @@
 // Play: a game against a bot at any rating (Maia-3 set to that chess.com rating, keeping its blunders to the rate
 // players at that rating make them, from the ladder), a legend, or one of your arena bots. With the coach on,
 // Stockfish grades every move of yours the way Review does and stops the game on a mistake or blunder, so you can
-// take it back or play on. Hints circle the piece to move, then show the move.
+// take it back or play on. Hints circle the piece to move, then show the move. Blindfold hides the pieces (hold Peek
+// to see them; they come back when the game ends); moves can also be typed (Nf3, exd5, O-O).
 const pl = {
-  opp: 'rating', rating: 1200, color: 'white', coach: true,
+  opp: 'rating', rating: 1200, color: 'white', coach: true, blind: false,
   userColor: 'white', line: [], idx: 0, marks: {}, flipped: false,
   bot: null, botKey: null, thinking: false, judging: false, hold: null, hint: 0, pre: null,
   token: 0, status: '', error: null, engine: null, board: null, built: false,
@@ -57,6 +58,7 @@ function renderPlay(sec) {
           <button class="btn" data-plnav="flip" title="Flip board">⇅</button>
           <button class="btn" data-plnav="new" title="New game">↺</button>
         </div>
+        <div class="pl-type"><input id="plType" placeholder="Type a move (Nf3, exd5, O-O)" autocomplete="off" spellcheck="false"><button class="btn hidden" id="plPeek" title="Hold to see the pieces">Peek</button></div>
       </div>
       <div class="rv-panel">
         <div class="rv-head" id="plHead"></div>
@@ -65,6 +67,18 @@ function renderPlay(sec) {
     pl.built = true;
     pl.board = new BoardView($('#plBoard', sec), { onMove: mv => plUserMove(mv) });
     $$('[data-plnav]', sec).forEach(b => b.onclick = () => plNav(b.dataset.plnav));
+    // a typed move: read as chess.js reads SAN (lenient: "nf3", "e2e4" and "0-0" work too)
+    const typed = $('#plType', sec);
+    typed.onkeydown = e => {
+      if (e.key !== 'Enter' || !typed.value.trim()) return;
+      const mv = plYourTurn() && pl.idx === pl.line.length ? moveTyped(plChess(pl.line.length), typed.value) : null;
+      if (!mv || pl.thinking || pl.judging || pl.hold) { typed.classList.add('bad-input'); setTimeout(() => typed.classList.remove('bad-input'), 400); return; }
+      typed.value = '';
+      plUserMove(mv);
+    };
+    const peek = $('#plPeek', sec), show = on => $('#plBoard').classList.toggle('peek', on);
+    peek.onpointerdown = () => show(true);
+    peek.onpointerup = peek.onpointerleave = () => show(false);
     document.addEventListener('keydown', e => {
       if (S.tab !== 'play' || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
       if (e.key === 'ArrowLeft') { e.preventDefault(); plNav('prev'); }
@@ -202,6 +216,9 @@ function plDraw() {
   // the reply your mistake allows, in red, while the game waits
   if (pl.hold && mark?.evalAfter?.best && pl.idx === pl.line.length) state.arrows.push({ from: mark.evalAfter.best.slice(0, 2), to: mark.evalAfter.best.slice(2, 4), color: cssVar('--critical'), width: 0.18 });
   pl.board.set(state);
+  const blind = pl.blind && !plChess(pl.line.length).game_over();
+  $('#plBoard').classList.toggle('blind', blind);
+  $('#plPeek').classList.toggle('hidden', !blind);
   if (pl.hint && pl.idx === pl.line.length) {
     pl.pre?.p.then(e => {
       if (!e.best || pl.pre?.fen !== pl.board.state.fen) return;
@@ -227,6 +244,7 @@ function plDraw() {
       ${pl.opp === 'rating' ? `<label>Rating <input type="range" id="plRating" min="400" max="2600" step="50" value="${pl.rating}"><b id="plRatingVal">${pl.rating}</b></label>` : ''}
       <label>You play <select id="plColor">${[['white', 'White'], ['black', 'Black'], ['random', 'Random']].map(([v, l]) => `<option value="${v}" ${pl.color === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label><input type="checkbox" id="plCoach" ${pl.coach ? 'checked' : ''}> Coach</label>
+      <label title="Hide the pieces: play from the move list (hold Peek to look)"><input type="checkbox" id="plBlind" ${pl.blind ? 'checked' : ''}> Blindfold</label>
     </div>
     <div class="muted small" id="plStatus">${esc(pl.status || '')}</div>
     <div class="var-line small">${toks || `<span class="muted">New game: ${pl.userColor === 'white' ? 'your move' : 'the bot moves first'}</span>`}</div>`;
@@ -235,6 +253,7 @@ function plDraw() {
   if (rr) { rr.oninput = e => { $('#plRatingVal').textContent = e.target.value; }; rr.onchange = e => { pl.rating = +e.target.value; plNew(); }; }
   $('#plColor').onchange = e => { pl.color = e.target.value; plNew(); };
   $('#plCoach').onchange = e => { pl.coach = e.target.checked; pl.hold = null; plDraw(); plTurn(); };
+  $('#plBlind').onchange = e => { pl.blind = e.target.checked; plDraw(); if (pl.blind) $('#plType').focus(); };
   $$('#plHead [data-pli]').forEach(e => e.onclick = () => { pl.idx = +e.dataset.pli; plDraw(); });
 
   const end = plChess(pl.line.length);

@@ -34,16 +34,16 @@ function renderPuzzles(sec) {
         <div class="twin-panel pz-panel"></div></div></div>`;
     pz.board = new BoardView($('#pzBoard', sec), { onMove: (mv, fenAfter) => pzAnswer(mv, fenAfter) });
   }
-  $('.pz-modes', sec).innerHTML = [['rated', 'Rated'], ...Object.entries(PZ_RUSH).map(([k, v]) => [k, v.label])].map(([k, l]) => `<button data-pzmode="${k}" class="${pz.mode === k ? 'active' : ''}">${l}</button>`).join('');
+  $('.pz-modes', sec).innerHTML = [['rated', 'Rated'], ['daily', 'Daily'], ...Object.entries(PZ_RUSH).map(([k, v]) => [k, v.label])].map(([k, l]) => `<button data-pzmode="${k}" class="${pz.mode === k ? 'active' : ''}">${l}</button>`).join('');
   $$('[data-pzmode]', sec).forEach(b => b.onclick = () => { pzStopRush(); pz.mode = b.dataset.pzmode; pz.cur = null; renderPuzzles(sec); });
-  if (!pz.cur && !pz.rush?.over) (pz.mode === 'rated' ? pzNext() : pzPanel());
+  if (!pz.cur && !pz.rush?.over) (pz.mode === 'rated' || pz.mode === 'daily' ? pzNext() : pzPanel());
   else pzPanel();
 }
 
 async function pzNext() {
   const st = pzStats();
   const target = pz.rush ? 500 + pz.rush.solved * 55 : st.rating;
-  const p = await pzPick(target, pz.mode === 'rated' ? pz.theme : '');
+  const p = pz.mode === 'daily' ? await pzDailyPuzzle() : await pzPick(target, pz.mode === 'rated' ? pz.theme : '');
   Object.assign(pz, { cur: p, step: 0, busy: true, failed: false, done: false, hinted: false, msg: null, delta: null });
   if (!p) { pzPanel(); return; }
   // the position before the opponent's move; their move slides in, then it's yours
@@ -108,6 +108,7 @@ function pzSolved() {
 
 // rated: Elo against the puzzle's rating; bigger steps for the first 20 puzzles
 function pzRate(score) {
+  if (pz.mode === 'daily') return pzDailyResult(score);
   const st = pzStats(), exp = 1 / (1 + Math.pow(10, (pz.cur.rating - st.rating) / 400)), k = st.n < 20 ? 40 : 20;
   const delta = Math.round(k * (score - exp));
   Object.assign(st, { rating: st.rating + delta, n: st.n + 1, solved: st.solved + score });
@@ -143,6 +144,30 @@ function pzSolution() {
   step();
 }
 
+// ---------- the daily puzzle ----------
+// One puzzle a day (1200–1900, the same for everyone on that date), unrated; the first try counts toward the streak
+// of days solved in a row (kept on this computer).
+const PZ_DAILY_KEY = 'cl:pz:daily';
+const pzToday = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+async function pzDailyPuzzle() {
+  const pool = (await getPuzzles()).filter(p => p.rating >= 1200 && p.rating < 1900);
+  let h = 0; for (const ch of pzToday()) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return pool[h % pool.length] || null;
+}
+function pzDaily() {
+  const days = store.get(PZ_DAILY_KEY, {}), d = new Date();
+  // today counts once played; until then the streak runs to yesterday
+  if (days[pzToday(d)] !== 'solved') d.setDate(d.getDate() - 1);
+  let streak = 0;
+  while (days[pzToday(d)] === 'solved') { streak++; d.setDate(d.getDate() - 1); }
+  return { streak, today: days[pzToday()] || null };
+}
+function pzDailyResult(score) {
+  const days = store.get(PZ_DAILY_KEY, {}), t = pzToday();
+  if (!days[t]) { days[t] = score ? 'solved' : 'missed'; store.set(PZ_DAILY_KEY, days); }
+  pz.delta = null;
+}
+
 // ---------- Puzzle Rush ----------
 function pzStartRush() {
   const cfg = PZ_RUSH[pz.mode];
@@ -173,7 +198,7 @@ function pzPanel() {
   if (!panel) return;
   const st = pzStats(), p = pz.cur, yourTurn = p && !pz.busy && !pz.done && pz.step % 2 === 1;
   const toMove = p ? (new Chess(p.fen).turn() === 'w' ? 'Black' : 'White') : '';
-  if (pz.mode !== 'rated') {
+  if (pz.mode !== 'rated' && pz.mode !== 'daily') {
     const r = pz.rush, best = st.best?.[pz.mode] || 0;
     meta.textContent = `${PZ_RUSH[pz.mode].label} · best ${best}`;
     if (!r) { panel.innerHTML = `<h3>${PZ_RUSH[pz.mode].label}</h3><p class="small">${PZ_RUSH[pz.mode].secs ? `Solve as many as you can in ${PZ_RUSH[pz.mode].secs / 60} minutes.` : 'No clock: keep going until your third mistake.'} Three mistakes end the run; puzzles get harder as you go.</p>
@@ -187,8 +212,9 @@ function pzPanel() {
     $('#pzQuit', panel)?.addEventListener('click', pzEndRush);
     return;
   }
-  meta.innerHTML = `Puzzle rating <b>${st.rating}</b>${st.n ? ` · ${st.n} played · ${Math.round(100 * st.solved / st.n)}% solved` : ''}`;
-  const theme = `<select class="pz-theme">${Object.entries(PZ_THEMES).map(([k, l]) => `<option value="${k}" ${k === pz.theme ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  if (pz.mode === 'daily') { const d = pzDaily(); meta.innerHTML = `Daily puzzle · ${new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} · streak <b>${d.streak}</b> day${d.streak === 1 ? '' : 's'}${d.today ? ` · today: ${d.today === 'solved' ? '✓ solved' : 'missed'}` : ''}`; }
+  else meta.innerHTML = `Puzzle rating <b>${st.rating}</b>${st.n ? ` · ${st.n} played · ${Math.round(100 * st.solved / st.n)}% solved` : ''}`;
+  const theme = pz.mode === 'daily' ? '' : `<select class="pz-theme">${Object.entries(PZ_THEMES).map(([k, l]) => `<option value="${k}" ${k === pz.theme ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
   if (!p) { panel.innerHTML = `<p class="muted">Loading puzzles…</p>${theme}`; bindPz(panel); return; }
   const head = pz.done
     ? (pz.failed ? `<h3>Solved after a slip</h3>` : `<h3>✓ Solved</h3>`) + (pz.delta != null ? `<p class="small">Rating ${pz.delta >= 0 ? '+' : ''}${pz.delta} → <b>${st.rating}</b></p>` : '')
@@ -196,7 +222,7 @@ function pzPanel() {
   const themes = p.themes.filter(t => PZ_THEMES[t]).map(t => PZ_THEMES[t]);
   panel.innerHTML = `${head}${pz.msg ? `<p class="small">${pz.msg}</p>` : ''}
     ${pz.done ? `<p class="small muted">Puzzle ${p.rating}${themes.length ? ` · ${themes.join(', ')}` : ''} · <a href="https://lichess.org/training/${p.id}" target="_blank" rel="noopener">lichess #${p.id}</a></p>` : ''}
-    <div class="learn-actions">${pz.done ? '<button class="btn primary" id="pzNextBtn">Next puzzle →</button>' : `<button class="btn" id="pzHint" ${yourTurn ? '' : 'disabled'}>Hint</button><button class="btn" id="pzSol">Solution</button>`}</div>
+    <div class="learn-actions">${pz.done ? (pz.mode === 'daily' ? '<span class="muted small">A new one tomorrow.</span>' : '<button class="btn primary" id="pzNextBtn">Next puzzle →</button>') : `<button class="btn" id="pzHint" ${yourTurn ? '' : 'disabled'}>Hint</button><button class="btn" id="pzSol">Solution</button>`}</div>
     <div style="margin-top:12px">${theme}</div>`;
   bindPz(panel);
 }

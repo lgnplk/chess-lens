@@ -3,7 +3,7 @@ const S = { username: null, player: null, games: [], filtered: [], months: 3, ta
 
 const RENDERERS = {
   overview: renderOverview, games: renderGames, openings: renderOpenings, playstyle: renderPlaystyle,
-  analytics: renderAnalytics, insights: renderInsights, prepare: renderPrepare, learn: renderLearn, play: renderPlay, editor: renderEditor, puzzles: renderPuzzles, explorer: renderExplorer, drills: renderDrills, bot: renderBot, arena: renderArena, report: renderReport,
+  analytics: renderAnalytics, insights: renderInsights, prepare: renderPrepare, learn: renderLearn, play: renderPlay, editor: renderEditor, puzzles: renderPuzzles, explorer: renderExplorer, drills: renderDrills, vision: renderVision, bot: renderBot, arena: renderArena, report: renderReport,
 };
 
 // Sections (top row) and their pages (second row)
@@ -11,13 +11,13 @@ const SECTIONS = {
   overview: [['overview', 'Summary'], ['analytics', 'Analytics'], ['report', 'Report']],
   games: [['games', 'Games'], ['review', 'Review'], ['explorer', 'Explorer'], ['editor', 'Editor'], ['openings', 'Openings'], ['prepare', 'Prepare']],
   insights: [['insights', 'Insights']],
-  train: [['puzzles', 'Puzzles'], ['drills', 'Drills'], ['learn', 'Openings']],
+  train: [['puzzles', 'Puzzles'], ['drills', 'Drills'], ['vision', 'Vision'], ['learn', 'Openings']],
   bots: [['play', 'Play'], ['bot', 'Your bot'], ['arena', 'Arena']],
 };
 const sectionOf = tab => Object.keys(SECTIONS).find(k => SECTIONS[k].some(([t]) => t === tab));
 const lastInSection = {};
 // without a loaded player only these pages work (in this order of preference within a section)
-const GUEST_TABS = ['play', 'arena', 'insights', 'puzzles', 'explorer', 'editor', 'review', 'learn', 'drills'];
+const GUEST_TABS = ['play', 'arena', 'insights', 'puzzles', 'explorer', 'editor', 'review', 'learn', 'drills', 'vision'];
 const firstTab = sec => document.body.classList.contains('guest')
   ? GUEST_TABS.find(t => SECTIONS[sec].some(([x]) => x === t)) : SECTIONS[sec][0][0];
 

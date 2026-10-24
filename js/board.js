@@ -4,14 +4,16 @@ const PIECE_IMG = 'https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/pi
 const FILES = 'abcdefgh';
 
 class BoardView {
-  constructor(el, { onMove } = {}) {
+  // onSquare: a left click on any square goes there instead of moving pieces (the Vision trainer)
+  constructor(el, { onMove, onSquare } = {}) {
     this.el = el;
     this.onMove = onMove;
+    this.onSquare = onSquare;
     this.state = { fen: new Chess().fen(), orientation: 'white', arrows: [] };
     this.selected = null; this.dests = [];
     this.drag = null;
     this.drawn = { arrows: [], circles: [] };   // the user's own right-click arrows and circles
-    el.classList.toggle('interactive', !!onMove);
+    el.classList.toggle('interactive', !!(onMove || onSquare));
     el.addEventListener('pointerdown', e => this.down(e));
     el.addEventListener('pointermove', e => this.move(e));
     el.addEventListener('pointerup', e => this.up(e));
@@ -73,6 +75,7 @@ class BoardView {
   // piece again lets it go. Right-drag draws an arrow, right-click a circle (shift: red); any left click clears them.
   down(e) {
     if (this.edit) return this.editDown(e);
+    if (this.onSquare && e.button === 0) { const sq = this.squareAt(e); if (sq) this.onSquare(sq); return; }
     if (e.button === 2) { this.drawFrom = this.squareAt(e); return; }
     if (e.button !== 0) return;
     if (this.drawn.arrows.length || this.drawn.circles.length) { this.drawn = { arrows: [], circles: [] }; this.render(); }
@@ -446,4 +449,11 @@ function materialInfo(fen) {
   // pieces captured BY white are black's missing pieces
   const missing = c => Object.entries(start).flatMap(([k, n]) => Array(Math.max(0, n - have[c][k])).fill(k));
   return { capturedByW: missing('b'), capturedByB: missing('w'), diff: pts('w') - pts('b') };
+}
+
+// A move typed by hand, as chess.js reads SAN (lenient: "e2e4", "0-0"), also with a lowercase piece letter ("nf3")
+function moveTyped(c, text) {
+  const t = text.trim().replace(/0/g, 'O');
+  if (!t) return null;
+  return c.move(t, { sloppy: true }) || (/^[nbrqk]/.test(t) ? c.move(t[0].toUpperCase() + t.slice(1), { sloppy: true }) : null);
 }

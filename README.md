@@ -45,7 +45,7 @@ Mentor doesn't allow browser cross-origin requests; the app's server does the sa
 
 Five sections: **Overview** (Summary with current ratings, Analytics, Report), **Games** (Games, Review, Explorer,
 Editor, Openings, Prepare), **Insights** (one page: the engine scan, style and shape, accuracy, blunders, and the ladder by
-rating), **Train** (Puzzles, Drills, Openings) and **Bots** (Play, Your bot, Arena). Without loading a player
+rating), **Train** (Puzzles, Drills, Vision, Openings) and **Bots** (Play, Your bot, Arena). Without loading a player
 ("Play the legends" or "Solve puzzles" on the welcome page) Review, Explorer, Train, Play Arena and the Editor still work.
 Copy is kept to a minimum.
 
@@ -55,11 +55,15 @@ Copy is kept to a minimum.
   (`js/puzzles.json`, built by `node tools/build-puzzles.js`: 500+ plays, popularity 80+, settled rating, up to
   1,600 drawn at random from every 100-point band from 400 to 2900). **Rated** keeps an Elo puzzle rating on this
   computer and serves puzzles near it, by theme if you like; **Puzzle Rush** (3 or 5 minutes, or untimed Survival)
-  gets harder as you go and ends on the third mistake. Any checkmate counts as a solution.
+  gets harder as you go and ends on the third mistake; **Daily** is one unrated puzzle a day (1200–1900, the same for
+  everyone on that date) with a streak of days solved on the first try. Any checkmate counts as a solution.
 - **Drills** (`js/drills.js`): the basic mates (queen, rook, two rooks, two bishops) and key endgames (opposition,
   queen against a pawn, Lucena, Philidor) played out against Stockfish at full strength. Every position was checked
   at depth 30; after each of your moves the engine checks that the win (or the draw) is still there, so a slip ends
   the drill at once.
+- **Vision** (`js/vision.js`): 30-second board-vision runs on a board without coordinates, as White, Black or
+  either: **Squares** (click the square named), **Moves** (an arrow shows a move in a real game position: type it)
+  and **Colours** (the board hidden: is the named square light or dark?). Best scores and recent runs per mode and side.
 - **Openings** (`js/learn.js`): practise a line move by move; a wrong move slides back with the book move shown.
 - **Explorer** (`js/explorer.js`, under Games): from any position, the moves played and how they scored, from
   434,770 over-the-board master games (`js/explorer-masters.json`, first 10 moves, positions in 5+ games; built by
@@ -68,7 +72,8 @@ Copy is kept to a minimum.
   legend, or one of your arena bots. The rating bot keeps 20+ win-% blunders to the rate the ladder's typical rapid
   player at that rating makes them (the blunder check below). With the **coach** on, Stockfish grades each of your
   moves as Review does, explains it, and stops the game on a mistake or blunder (the reply it allows drawn in red) so
-  you can take it back or play on. Hints circle the piece, then show the move. Finished games open in Review.
+  you can take it back or play on. Hints circle the piece, then show the move. **Blindfold** hides the pieces (hold
+  Peek to look; they return when the game ends), and moves can be typed (Nf3, exd5, O-O). Finished games open in Review.
 - **Board editor** (`js/editor.js`, under Games; ✎ in Review opens the current position there): drag pieces
   anywhere, paint them from the palette (drag one off the board, or right-click a square, to clear it), set the side
   to move and castling, paste or copy a FEN, then play moves from it. **Show … move** asks Stockfish (top 5 lines),
@@ -145,6 +150,7 @@ Maia-3 is AGPL-3.0: if you give the app to other people, offer them the source (
 | `js/famous-profiles.json` | The legends' precomputed fingerprints (counts from their classical games) |
 | `js/puzzles.js`, `js/drills.js`, `js/learn.js` | Train: puzzles and Puzzle Rush, endgame drills, opening practice |
 | `js/explorer.js` | Opening explorer: master games (`js/explorer-masters.json`) or your own |
+| `js/vision.js` | Vision trainer: squares, moves and colours against the clock |
 | `js/editor.js` | Board editor: set up any position and ask Stockfish or any bot for its move |
 | `js/play.js` | Play a bot at any rating, a legend or your bots, with the coach |
 | `js/book.json` | Opening book (positions → ECO/name), built by `node tools/build-book.js` from lichess chess-openings |
