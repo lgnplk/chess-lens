@@ -1,11 +1,12 @@
 // Vision: board-vision drills against a 30-second clock, on a board without coordinates.
 //   Squares: a square is named; click it.
 //   Moves: an arrow shows a move in a position from a real game (the puzzle set); type it (Nf3, exd5, O-O, e8=Q).
+//   Play it: the other way round: a move is named in notation; play it on the board.
 //   Colours: a square is named and the board is hidden; is it light or dark?
 // Each run scores right answers; a miss shows the answer and moves on. Best scores and the last runs are kept per
 // mode and side (stored on this computer).
 const VZ_KEY = 'cl:vision:v1', VZ_SECS = 30;
-const VZ_MODES = { squares: 'Squares', moves: 'Moves', colors: 'Colours' };
+const VZ_MODES = { squares: 'Squares', moves: 'Moves', play: 'Play it', colors: 'Colours' };
 const vz = { mode: 'squares', side: 'white', coords: false, run: null, board: null, built: false };
 const vzStore = () => store.get(VZ_KEY, {});
 const vzKey = () => `${vz.mode}:${vz.side}`;
@@ -17,7 +18,8 @@ function renderVision(sec) {
     sec.innerHTML = `<div class="rv">
       <div class="rv-board"><div class="board-wrap" id="vzWrap"><div class="board no-coords" id="vzBoard"></div></div></div>
       <div class="rv-panel"><div class="rv-head" id="vzHead"></div><div class="rv-body" id="vzBody"></div></div></div>`;
-    vz.board = new BoardView($('#vzBoard', sec), { onSquare: sq => vzClick(sq) });
+    // clicks name squares in Squares; in Play it the board takes moves (vzDraw switches between the two)
+    vz.board = new BoardView($('#vzBoard', sec), { onSquare: vzClick, onMove: vzPlayed });
     vz.built = true;
     document.addEventListener('keydown', e => {
       if (S.tab !== 'vision' || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
@@ -46,7 +48,7 @@ function vzStop() { if (vz.run) clearInterval(vz.run.timer); vz.run = null; }
 async function vzNext() {
   const r = vz.run; if (!r || r.over) return;
   r.asked = performance.now();
-  if (vz.mode === 'moves') {
+  if (vz.mode === 'moves' || vz.mode === 'play') {
     // a real position (a puzzle's start) with the side to move matching the board's bottom, and one of its legal moves
     const P = await getPuzzles();
     for (let k = 0; k < 50; k++) {
@@ -66,8 +68,9 @@ function vzRecord(ok, given) {
   const r = vz.run; if (!r || r.over) return;
   r.times.push(performance.now() - r.asked);
   if (ok) { r.score++; Sound.play('move'); }
-  else { r.misses.push({ want: vz.mode === 'moves' ? r.target.mv.san : r.target, given }); Sound.play('capture'); }
-  r.flash = { ok, want: vz.mode === 'moves' ? r.target.mv.san : r.target, given };
+  const want = r.target?.mv ? r.target.mv.san : r.target;
+  if (!ok) { r.misses.push({ want, given }); Sound.play('capture'); }
+  r.flash = { ok, want, given };
 }
 
 function vzClick(sq) {
@@ -79,6 +82,15 @@ function vzClick(sq) {
   vz.board.drawn.circles = [];
   vz.board.set({ ...vz.board.state, badge: { sq, cls: ok ? 'best' : 'blunder', text: ok ? '✓' : '✗' } });
   if (!ok) { vz.board.drawn.circles = [{ from: want, to: want, color: cssVar('--good') }]; vz.board.render(); }
+  vzNext();
+}
+
+// Play it: the move played on the board, against the one named
+function vzPlayed(mv) {
+  const r = vz.run;
+  if (!r || r.over || vz.mode !== 'play' || !r.target?.mv) return;
+  const want = r.target.mv;
+  vzRecord(mv.from === want.from && mv.to === want.to && (mv.promotion || '') === (want.promotion || ''), mv.san);
   vzNext();
 }
 
@@ -114,10 +126,13 @@ function vzDraw() {
   if (!vz.built) return;
   const r = vz.run, playing = r && !r.over, orientation = r?.orientation || (vz.side === 'black' ? 'black' : 'white');
   $('#vzBoard').classList.toggle('no-coords', !vz.coords);
+  $('#vzBoard').classList.toggle('no-dots', vz.mode === 'play');   // finding the square is the drill
   $('#vzWrap').classList.toggle('vz-hidden', vz.mode === 'colors' && !!playing);
-  if (vz.mode === 'moves' && r?.target?.fen) {
-    const m = r.target.mv;
-    vz.board.jump({ fen: r.target.fen, orientation, arrows: playing ? [{ from: m.from, to: m.to, color: cssVar('--s1'), width: 0.2, opacity: 0.9 }] : [], lastMove: playing ? { from: m.from, to: m.from } : null });
+  vz.board.onSquare = vz.mode === 'squares' ? vzClick : null;
+  vz.board.onMove = vz.mode === 'play' && playing ? vzPlayed : null;
+  if ((vz.mode === 'moves' || vz.mode === 'play') && r?.target?.fen) {
+    const m = r.target.mv, shown = playing && vz.mode === 'moves';
+    vz.board.jump({ fen: r.target.fen, orientation, arrows: shown ? [{ from: m.from, to: m.to, color: cssVar('--s1'), width: 0.2, opacity: 0.9 }] : [], lastMove: shown ? { from: m.from, to: m.from } : null });
   } else if (!playing || vz.mode !== 'squares' || !vz.board.state.badge) vz.board.jump({ fen: '8/8/8/8/8/8/8/8 w - - 0 1', orientation });
 
   const rec = vzStore()[vzKey()];
@@ -129,7 +144,7 @@ function vzDraw() {
   $$('[data-vzside]').forEach(b => b.onclick = () => { vz.side = b.dataset.vzside; vzStop(); vzDraw(); });
   $('#vzCoords').onchange = e => { vz.coords = e.target.checked; vzDraw(); };
 
-  const how = { squares: 'A square is named: click it.', moves: 'An arrow shows a move: type it (Nf3, exd5, O-O, e8=Q).', colors: 'A square is named: is it light or dark? (← light, → dark)' }[vz.mode];
+  const how = { squares: 'A square is named: click it.', moves: 'An arrow shows a move: type it (Nf3, exd5, O-O, e8=Q).', play: 'A move is named: play it on the board (drag or click).', colors: 'A square is named: is it light or dark? (← light, → dark)' }[vz.mode];
   const body = $('#vzBody');
   if (!r) {
     body.innerHTML = `<p class="small">${how} You have ${VZ_SECS} seconds; a miss shows the answer and moves on.</p>
@@ -148,7 +163,7 @@ function vzDraw() {
     return;
   }
   const flash = r.flash;   // the last answer, until the next one
-  const prompt = vz.mode === 'moves' ? '' : `<div class="vz-prompt">${r.target || ''}</div>`;
+  const prompt = vz.mode === 'moves' ? '' : `<div class="vz-prompt">${esc(r.target?.mv ? r.target.mv.san : r.target || '')}</div>`;
   body.innerHTML = `<div class="vz-bar"><span class="vz-score">${r.score}</span><span class="vz-clock" id="vzClock">${r.left.toFixed(0)}</span></div>
     ${prompt}
     ${vz.mode === 'moves' ? `<input class="vz-type" id="vzType" placeholder="Type the move" autocomplete="off" spellcheck="false">` : ''}

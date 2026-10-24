@@ -62,8 +62,8 @@ Copy is kept to a minimum.
   at depth 30; after each of your moves the engine checks that the win (or the draw) is still there, so a slip ends
   the drill at once.
 - **Vision** (`js/vision.js`): 30-second board-vision runs on a board without coordinates, as White, Black or
-  either: **Squares** (click the square named), **Moves** (an arrow shows a move in a real game position: type it)
-  and **Colours** (the board hidden: is the named square light or dark?). Best scores and recent runs per mode and side.
+  either: **Squares** (click the square named), **Moves** (an arrow shows a move in a real game position: type it),
+  **Play it** (a move is named: play it on the board, with no legal-move dots) and **Colours** (the board hidden: is the named square light or dark?). Best scores and recent runs per mode and side.
 - **Openings** (`js/learn.js`): practise a line move by move; a wrong move slides back with the book move shown.
 - **Explorer** (`js/explorer.js`, under Games): from any position, the moves played and how they scored, from
   434,770 over-the-board master games (`js/explorer-masters.json`, first 10 moves, positions in 5+ games; built by
