@@ -100,6 +100,8 @@ ipcMain.on('sf-spawn', (e, id) => {
   procs.set(id, p);
 });
 ipcMain.on('sf-send', (e, id, cmd) => { const p = procs.get(id); if (p && !p.killed) p.stdin.write(cmd + '\n'); });
+// the page's theme for the window buttons drawn over its app bar
+ipcMain.on('titlebar', (e, o) => { try { BrowserWindow.fromWebContents(e.sender)?.setTitleBarOverlay(o); } catch { /* not supported here */ } });
 ipcMain.on('sf-kill', (e, id) => { const p = procs.get(id); if (p) { p.kill(); procs.delete(id); } });
 const killAll = () => { for (const p of procs.values()) p.kill(); procs.clear(); };
 
@@ -107,8 +109,11 @@ async function createWindow() {
   nativeOk = await checkStockfish();
   const port = await startServer();
   const win = new BrowserWindow({
-    width: 1400, height: 920, minWidth: 380, backgroundColor: '#14120f', title: 'Chess Lens',
+    width: 1440, height: 940, minWidth: 380, minHeight: 480, backgroundColor: '#14120f', title: 'Chess Lens',
     icon: path.join(__dirname, 'icon.png'),
+    // no stock title bar: the page's app bar is the title bar, with Windows' own buttons drawn over its right end
+    // (the page sets their colours to the theme's: the 'titlebar' message)
+    titleBarStyle: 'hidden', titleBarOverlay: { color: '#14120f', symbolColor: '#eee7d8', height: 51 }, autoHideMenuBar: true,
     // a one-off job (CL_PROFILE, e.g. the ladder build) keeps full speed in a background window
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: false, backgroundThrottling: !process.env.CL_PROFILE },
   });
@@ -121,13 +126,22 @@ async function createWindow() {
   win.webContents.on('did-start-navigation', (e, url, inPlace, mainFrame) => {
     if ((e.isMainFrame ?? mainFrame) && !(e.isSameDocument ?? inPlace)) killAll();
   });
+  // the menu bar is hidden, so its keys are handled here
+  win.webContents.on('before-input-event', (e, i) => {
+    if (i.type !== 'keyDown') return;
+    const k = i.key, ctrl = i.control || i.meta;
+    if (k === 'F11') { win.setFullScreen(!win.isFullScreen()); e.preventDefault(); }
+    else if (k === 'F12' || (ctrl && i.shift && k.toLowerCase() === 'i')) { win.webContents.toggleDevTools(); e.preventDefault(); }
+    else if (k === 'F5' || (ctrl && k.toLowerCase() === 'r')) { win.webContents.reload(); e.preventDefault(); }
+  });
   win.loadURL(`http://127.0.0.1:${port}/`);
   return win;
 }
 
 Menu.setApplicationMenu(Menu.buildFromTemplate([
   { label: 'File', submenu: [{ role: 'reload' }, { role: 'forceReload' }, { type: 'separator' }, { role: 'quit' }] },
-  { label: 'View', submenu: [{ role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }, { type: 'separator' }, { role: 'togglefullscreen' }, { role: 'toggleDevTools' }] },
+  // (interface size is the page's own setting: Ctrl + = / − / 0)
+  { label: 'View', submenu: [{ role: 'togglefullscreen' }, { role: 'toggleDevTools' }] },
 ]));
 
 // Updates: the installed app checks this project's GitHub releases at start-up, downloads a newer version in the

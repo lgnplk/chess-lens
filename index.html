@@ -12,79 +12,83 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
-<header class="topbar">
-  <div class="brand"><span class="logo">♞</span> Chess Lens</div>
-  <form id="loadForm" class="loadform" autocomplete="off">
-    <input id="username" type="text" placeholder="chess.com username" required spellcheck="false">
-    <select id="months" title="How much history to load">
-      <option value="1">Last month</option>
-      <option value="3" selected>Last 3 months</option>
-      <option value="6">Last 6 months</option>
-      <option value="12">Last 12 months</option>
-      <option value="24">Last 2 years</option>
-      <option value="999">All time</option>
-    </select>
-    <button type="submit" class="btn primary">Load<span class="wide-only"> games</span></button>
-  </form>
-  <button id="soundToggle" class="btn ghost icon" title="Sound on/off">♪</button>
-  <button id="themeToggle" class="btn ghost icon" title="Toggle light/dark">◐</button>
-</header>
-
-<div id="status" class="status hidden"></div>
-
-<section id="welcome" class="welcome">
-  <div class="hero">
-    <div>
-      <div class="overline">Chess.com game analysis</div>
-      <h1>A statistical read on how you play.</h1>
-      <p class="lede">Enter a chess.com username above. Engine-checked accuracy and blunders, openings and playing style, measured against every rating level.</p>
-      <div class="hero-cta"><button class="btn primary" id="guestArena">Play the legends</button><button class="btn" id="guestTrain">Solve puzzles</button><span class="muted">No account needed.</span></div>
+<div class="shell" id="shell">
+  <aside class="sidebar" id="sidebar">
+    <button class="sb-brand" id="sbBrand" title="Home"><span class="logo">♞</span><span class="sb-label">Chess Lens</span></button>
+    <div class="sb-player" id="sbPlayer"><div class="player-chip" id="playerChip"></div></div>
+    <nav class="sb-nav" id="nav"></nav>
+    <div class="sb-foot" id="sbFoot"></div>
+  </aside>
+  <div class="sb-scrim" id="sbScrim"></div>
+  <div class="main-col">
+    <header class="appbar" id="appbar">
+      <button class="ab-btn sb-open" id="sbOpen" title="Menu"></button>
+      <button class="ab-btn" id="navBack" title="Back (Alt+←)"></button>
+      <button class="ab-btn" id="navFwd" title="Forward (Alt+→)"></button>
+      <div class="crumbs" id="crumbs"></div>
+      <form id="loadForm" class="loadform" autocomplete="off">
+        <span class="lf-icon" id="lfIcon"></span>
+        <input id="username" type="text" placeholder="Load a chess.com player" required spellcheck="false">
+        <select id="months" title="How much history to load">
+          <option value="1">1 month</option>
+          <option value="3" selected>3 months</option>
+          <option value="6">6 months</option>
+          <option value="12">12 months</option>
+          <option value="24">2 years</option>
+          <option value="999">All time</option>
+        </select>
+        <button type="submit" class="btn primary">Load</button>
+      </form>
+      <button class="ab-btn" id="paletteBtn" title="Go to… (Ctrl+K)"></button>
+      <button class="ab-btn" id="soundToggle" title="Sound on/off"></button>
+      <button class="ab-btn" id="themeToggle" title="Light / dark"></button>
+      <div class="wco-space"></div>
+    </header>
+    <div id="status" class="status hidden"></div>
+    <main id="app" class="content">
+    <div class="filters" id="filters">
+      <div class="seg tc-seg" id="fTimeSeg"></div>
+      <label title="Time control" class="hidden">
+        <select id="fTime"><option value="all">All time controls</option><option value="bullet">Bullet</option><option value="blitz">Blitz</option><option value="rapid">Rapid</option><option value="daily">Daily</option></select>
+      </label>
+      <label title="Color">
+        <select id="fColor"><option value="all">Both colors</option><option value="white">White</option><option value="black">Black</option></select>
+      </label>
+      <label title="Rated or casual">
+        <select id="fRated"><option value="all">All games</option><option value="rated">Rated only</option></select>
+      </label>
+      <span class="count" id="fCount"></span>
     </div>
-    <figure class="diagram">
-      <div class="diagram-frame"><div class="board" id="heroBoard"></div></div>
-      <figcaption>Morphy – Duke Karl &amp; Count Isouard, Paris 1858, after 17.Rd8#.</figcaption>
-    </figure>
-  </div>
-  <div class="contents">
-    <div class="feature-grid">
-      <div class="feature"><span class="num">I</span><b>Game review</b><span>Stockfish evaluation, accuracy, verified brilliant moves and a coach for every move.</span></div>
-      <div class="feature"><span class="num">II</span><b>Playing style</b><span>An archetype from what you do differently from your own opponents, once your games are scanned.</span></div>
-      <div class="feature"><span class="num">III</span><b>Rating ladder</b><span>Your accuracy, blunders and habits against the typical player at any rating.</span></div>
-      <div class="feature"><span class="num">IV</span><b>Head to head</b><span>Compare two players, then prepare against a real repertoire.</span></div>
-      <div class="feature"><span class="num">V</span><b>Player bots</b><span>Bots built from real players' games, with matches and tournaments.</span></div>
-      <div class="feature"><span class="num">VI</span><b>Openings and analytics</b><span>Results by opening and colour, time trouble, tilt, and opponent strength.</span></div>
-      <div class="feature"><span class="num">VII</span><b>Puzzles and drills</b><span>Rated and daily puzzles, Puzzle Rush, endgames against Stockfish, board vision, and opening practice.</span></div>
-      <div class="feature"><span class="num">VIII</span><b>Opening explorer</b><span>Every move from 434,000 master games, and from your own.</span></div>
+
+      <section class="tab hidden welcome" id="tab-home">
+    <div class="hero">
+      <div>
+        <div class="overline">Chess.com game analysis</div>
+        <h1>A statistical read on how you play.</h1>
+        <p class="lede">Search for a chess.com player at the top. Engine-checked accuracy and blunders, openings and playing style, measured against every rating level.</p>
+        <div class="hero-cta"><button class="btn primary" id="guestArena">Play the legends</button><button class="btn" id="guestTrain">Solve puzzles</button><span class="muted">No account needed.</span></div>
+      </div>
+      <figure class="diagram">
+        <div class="diagram-frame"><div class="board" id="heroBoard"></div></div>
+        <figcaption>Morphy – Duke Karl &amp; Count Isouard, Paris 1858, after 17.Rd8#.</figcaption>
+      </figure>
     </div>
-  </div>
-</section>
+    <div class="contents">
+      <div class="feature-grid">
+        <div class="feature"><span class="num">I</span><b>Game review</b><span>Stockfish evaluation, accuracy, verified brilliant moves and a coach for every move.</span></div>
+        <div class="feature"><span class="num">II</span><b>Playing style</b><span>An archetype from what you do differently from your own opponents, once your games are scanned.</span></div>
+        <div class="feature"><span class="num">III</span><b>Rating ladder</b><span>Your accuracy, blunders and habits against the typical player at any rating.</span></div>
+        <div class="feature"><span class="num">IV</span><b>Head to head</b><span>Compare two players, then prepare against a real repertoire.</span></div>
+        <div class="feature"><span class="num">V</span><b>Player bots</b><span>Bots built from real players' games, with matches and tournaments.</span></div>
+        <div class="feature"><span class="num">VI</span><b>Openings and analytics</b><span>Results by opening and colour, time trouble, tilt, and opponent strength.</span></div>
+        <div class="feature"><span class="num">VII</span><b>Puzzles and drills</b><span>Rated and daily puzzles, Puzzle Rush, endgames against Stockfish, board vision, and opening practice.</span></div>
+        <div class="feature"><span class="num">VIII</span><b>Opening explorer</b><span>Every move from 434,000 master games, and from your own.</span></div>
+      </div>
+    </div>
+  </section>
+      <section class="tab hidden" id="tab-settings"></section>
 
-<main id="app" class="hidden">
-  <div class="filters" id="filters">
-    <div class="player-chip" id="playerChip"></div>
-    <div class="seg tc-seg" id="fTimeSeg"></div>
-    <label title="Time control" class="hidden">
-      <select id="fTime"><option value="all">All time controls</option><option value="bullet">Bullet</option><option value="blitz">Blitz</option><option value="rapid">Rapid</option><option value="daily">Daily</option></select>
-    </label>
-    <label title="Color">
-      <select id="fColor"><option value="all">Both colors</option><option value="white">White</option><option value="black">Black</option></select>
-    </label>
-    <label title="Rated or casual">
-      <select id="fRated"><option value="all">All games</option><option value="rated">Rated only</option></select>
-    </label>
-    <span class="count" id="fCount"></span>
-  </div>
-
-  <nav class="tabs" id="tabs">
-    <button data-sec="overview" class="active">Overview</button>
-    <button data-sec="games">Games</button>
-    <button data-sec="insights">Insights</button>
-    <button data-sec="train">Train</button>
-    <button data-sec="bots">Bots</button>
-  </nav>
-  <nav class="subtabs" id="subtabs"></nav>
-
-  <section class="tab" id="tab-overview"></section>
+  <section class="tab hidden" id="tab-overview"></section>
   <section class="tab hidden" id="tab-games"></section>
   <section class="tab hidden" id="tab-review">
     <div class="rv">
@@ -151,11 +155,15 @@
   <section class="tab hidden" id="tab-bot"></section>
   <section class="tab hidden" id="tab-arena"></section>
   <section class="tab hidden" id="tab-report"></section>
-</main>
+    </main>
+  </div>
+</div>
+<div class="palette hidden" id="palette"><div class="pal-box"><input id="palInput" placeholder="Go to a page, or type a command…" spellcheck="false" autocomplete="off"><div class="pal-list" id="palList"></div></div></div>
 
 <div id="tooltip" class="tooltip hidden"></div>
 
 <script src="js/util.js"></script>
+<script src="js/icons.js"></script>
 <script src="js/api.js"></script>
 <script src="js/engine.js"></script>
 <script src="js/board.js"></script>
@@ -186,6 +194,7 @@
 <script src="js/arena.js"></script>
 <script src="js/play.js"></script>
 <script src="js/editor.js"></script>
+<script src="js/shell.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

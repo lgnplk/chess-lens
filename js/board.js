@@ -1,12 +1,15 @@
 // Board view: squares, pieces, last-move highlight, arrows, move-quality badge, click/drag move input with
 // legal-move dots, a promotion choice, and the user's own right-click arrows and circles.
-const PIECE_IMG = 'https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/piece/cburnett/';
+// the piece set and motion speed follow Settings (js/shell.js)
+let PIECE_IMG = 'https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/piece/cburnett/';
 const FILES = 'abcdefgh';
 
 class BoardView {
+  static all = new Set();   // every board, so a settings change (pieces, colours) redraws them all
   // onSquare: a left click on any square goes there instead of moving pieces (the Vision trainer)
   constructor(el, { onMove, onSquare } = {}) {
     this.el = el;
+    BoardView.all.add(this);
     this.onMove = onMove;
     this.onSquare = onSquare;
     this.state = { fen: new Chess().fen(), orientation: 'white', arrows: [] };
@@ -355,7 +358,8 @@ class BoardView {
   }
 }
 
-const BOARD_ANIM_MS = 200;
+let BOARD_ANIM_MS = 200;
+let SOUND_VOL = 1;
 
 // Board sounds, synthesised (no audio files): a short wooden tap for a move, a heavier double tap for a capture,
 // and two notes for a drill verdict. The header's speaker button turns them off (remembered).
@@ -366,13 +370,13 @@ const Sound = (() => {
     const n = Math.floor(c.sampleRate * 0.07), buf = c.createBuffer(1, n, c.sampleRate), d = buf.getChannelData(0);
     for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n) ** 5;
     const src = c.createBufferSource(), bp = c.createBiquadFilter(), g = c.createGain();
-    src.buffer = buf; bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 1.4; g.gain.value = gain;
+    src.buffer = buf; bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 1.4; g.gain.value = gain * SOUND_VOL;
     src.connect(bp).connect(g).connect(c.destination); src.start(t);
   };
   const tone = (c, t, freq, dur, gain) => {
     const o = c.createOscillator(), g = c.createGain();
     o.type = 'sine'; o.frequency.value = freq;
-    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(gain, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(gain * SOUND_VOL, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g).connect(c.destination); o.start(t); o.stop(t + dur + 0.02);
   };
   return {

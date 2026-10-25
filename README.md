@@ -41,13 +41,26 @@ chess.js, Chart.js, Stockfish 10 (WebAssembly), onnxruntime-web, JSZip, and the 
 relays PGN Mentor's player database (`/relay/pgnmentor/…`, limited to its index page and player zips), because PGN
 Mentor doesn't allow browser cross-origin requests; the app's server does the same.
 
-## Navigation
+## Navigation and settings
 
-Five sections: **Overview** (Summary with current ratings, Analytics, Report), **Games** (Games, Review, Explorer,
-Editor, Openings, Prepare), **Insights** (one page: the engine scan, style and shape, accuracy, blunders, and the ladder by
-rating), **Train** (Puzzles, Drills, Vision, Openings) and **Bots** (Play, Your bot, Arena). Without loading a player
-("Play the legends" or "Solve puzzles" on the welcome page) Review, Explorer, Train, Play Arena and the Editor still work.
-Copy is kept to a minimum.
+The app is laid out as a desktop app (`js/shell.js`): a **sidebar** with every page under five sections,
+**Overview** (Summary, Analytics, Report), **Games** (Games, Review, Explorer, Editor, Openings, Prepare), **Insights**
+(the engine scan, style and shape, accuracy, blunders and the ladder by rating), **Train** (Puzzles, Drills, Vision,
+Openings) and **Bots** (Play, Your bot, Arena), with the loaded player's card and current ratings at the top. It can
+shrink to icons (Ctrl+B) and slides over the page in narrow windows. The **app bar** above the page is the window's
+title bar in the desktop app (drag to move, double-click to maximise; Windows' own buttons drawn over its end in the
+theme's colours): back and forward, where you are, the player search, Ctrl+K, sound and light/dark. Pages that need a
+player stay locked until one is loaded; Review, Explorer, Editor, Insights, Train, Play and Arena work without one.
+
+- **Go to anything** (Ctrl+K): every page and command (themes, sidebar, size, sound), filtered as you type.
+- **Shortcuts**: Ctrl+1–5 the sections, Alt+←/→ (or the mouse's side buttons) back and forward, Ctrl+L the player
+  search, Ctrl+, Settings, Ctrl+=/−/0 interface size, F11 full screen, F12 developer tools, Ctrl+R reload.
+- **Settings** (kept on this computer): theme (Match Windows, Chess book, Paper, Night, Slate, Tournament hall,
+  Midnight), accent colour (or any colour), book-serif or clean-sans headings, interface size (85–160%, 110% by
+  default), sidebar; board squares (theme, wood, brown, green, blue, ice, purple, grey, coral, olive), 17 piece sets
+  (lichess's), coordinates, legal-move dots, piece motion (off to slow); sounds and their volume.
+
+Icons are a few of Lucide's (lucide.dev, ISC), kept in `js/icons.js`. Copy is kept to a minimum.
 
 ## Training
 
@@ -131,6 +144,8 @@ Maia-3 is AGPL-3.0: if you give the app to other people, offer them the source (
 | `js/analysis.js` | Move classification, accuracy, explanations, per-opportunity style records, parallel scan runner |
 | `js/analysis-worker.js` | Scores finished games and extracts style records off the main thread during scans |
 | `js/insights.js` | Aggregates: overview, openings, habits, style profile, analytics, engine-scan stats, report rules |
+| `js/shell.js` | App shell: sidebar, app bar, history, command palette, shortcuts, settings and themes |
+| `js/icons.js` | The interface's icons (Lucide, as SVG strings) |
 | `js/views.js` | Tab renderers and charts |
 | `js/review.js` | Game review: board, variations, live lines, coach, eval graph |
 | `js/sources.js` | Game sources: chess.com accounts, chess.com titled lists, Lichess exports, PGN Mentor OTB careers; shared picker UI |

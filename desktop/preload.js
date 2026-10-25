@@ -1,5 +1,5 @@
 // Gives the page native Stockfish processes (js/engine.js turns this into Worker-like objects).
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 const listeners = new Map();
 // one call per burst of lines: crossing into the page is the expensive part, not the lines
@@ -12,4 +12,7 @@ contextBridge.exposeInMainWorld('chessLensNative', {
   spawn(onLine) { const id = ++seq; listeners.set(id, onLine); ipcRenderer.send('sf-spawn', id); return id; },
   send(id, cmd) { ipcRenderer.send('sf-send', id, cmd); },
   kill(id) { listeners.delete(id); ipcRenderer.send('sf-kill', id); },
+  // the app shell: interface size, and the window buttons' colours over the app bar
+  setZoom(f) { webFrame.setZoomFactor(f); },
+  setTitleBar(o) { ipcRenderer.send('titlebar', o); },
 });

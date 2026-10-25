@@ -1,25 +1,27 @@
-// App wiring: loading, filters, tabs, theme
-const S = { username: null, player: null, games: [], filtered: [], months: 3, tab: 'overview', scanAgg: null };
+// App wiring: loading, filters, pages (the shell around them, settings and themes: js/shell.js)
+const S = { username: null, player: null, games: [], filtered: [], months: 3, tab: null, scanAgg: null };
 
 const RENDERERS = {
   overview: renderOverview, games: renderGames, openings: renderOpenings, playstyle: renderPlaystyle,
   analytics: renderAnalytics, insights: renderInsights, prepare: renderPrepare, learn: renderLearn, play: renderPlay, editor: renderEditor, puzzles: renderPuzzles, explorer: renderExplorer, drills: renderDrills, vision: renderVision, bot: renderBot, arena: renderArena, report: renderReport,
+  settings: renderSettings, home: () => {},
 };
 
-// Sections (top row) and their pages (second row)
+// Sections and their pages (the sidebar); home and settings sit outside them
 const SECTIONS = {
   overview: [['overview', 'Summary'], ['analytics', 'Analytics'], ['report', 'Report']],
   games: [['games', 'Games'], ['review', 'Review'], ['explorer', 'Explorer'], ['editor', 'Editor'], ['openings', 'Openings'], ['prepare', 'Prepare']],
   insights: [['insights', 'Insights']],
   train: [['puzzles', 'Puzzles'], ['drills', 'Drills'], ['vision', 'Vision'], ['learn', 'Openings']],
   bots: [['play', 'Play'], ['bot', 'Your bot'], ['arena', 'Arena']],
+  app: [['home', 'Home'], ['settings', 'Settings']],
 };
 const sectionOf = tab => Object.keys(SECTIONS).find(k => SECTIONS[k].some(([t]) => t === tab));
 const lastInSection = {};
-// without a loaded player only these pages work (in this order of preference within a section)
-const GUEST_TABS = ['play', 'arena', 'insights', 'puzzles', 'explorer', 'editor', 'review', 'learn', 'drills', 'vision'];
-const firstTab = sec => document.body.classList.contains('guest')
-  ? GUEST_TABS.find(t => SECTIONS[sec].some(([x]) => x === t)) : SECTIONS[sec][0][0];
+// without a loaded player only these pages work (in this order of preference within a section); the others are locked
+const GUEST_TABS = ['home', 'settings', 'play', 'arena', 'insights', 'puzzles', 'explorer', 'editor', 'review', 'learn', 'drills', 'vision'];
+const firstTab = sec => !S.username
+  ? GUEST_TABS.find(t => SECTIONS[sec].some(([x]) => x === t)) || SECTIONS[sec][0][0] : SECTIONS[sec][0][0];
 
 function setStatus(msg, isError = false) {
   const s = $('#status');
@@ -46,21 +48,13 @@ function renderTab(tab) {
 }
 
 function switchTab(tab) {
+  const prev = S.tab;
   S.tab = tab;
-  const sec = sectionOf(tab);
-  lastInSection[sec] = tab;
-  $$('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.sec === sec));
-  // the sub-menu is rebuilt only when the section changes; within a section only the highlight moves
-  const sub = $('#subtabs');
-  if (sub.dataset.sec !== sec) {
-    sub.dataset.sec = sec;
-    sub.innerHTML = SECTIONS[sec].length > 1 ? SECTIONS[sec].map(([t, label]) => `<button data-tab="${t}">${label}</button>`).join('') : '';
-    $$('#subtabs button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
-  }
-  $$('#subtabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  lastInSection[sectionOf(tab)] = tab;
+  onNavigate(prev, tab);   // sidebar, crumbs, history, filters (js/shell.js)
   $$('.tab').forEach(s => s.classList.toggle('hidden', s.id !== 'tab-' + tab));
   // the menu repaints first; heavy pages then render on the next frame instead of blocking the click
-  if (['review', 'bot', 'prepare', 'arena'].includes(tab)) renderTab(tab);
+  if (['review', 'bot', 'prepare', 'arena', 'settings'].includes(tab)) renderTab(tab);
   else {
     // (a timer backs up the frames: a hidden or minimised window gets no animation frames)
     let done = false;
@@ -84,15 +78,13 @@ async function loadUser(username) {
     const { player, games } = await loadPlayerData(username, months, setStatus);
     await relabelOpenings(games);
     Object.assign(S, { username, player, games, months, scanAgg: null });
-    const p = player.profile;
-    $('#playerChip').innerHTML = `${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ''}<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.username || username)}</a>${p.title ? ` <span class="pill">${esc(p.title)}</span>` : ''}`;
-    $('#welcome').classList.add('hidden');
-    $('#app').classList.remove('hidden');
-    document.body.classList.remove('guest');
+    renderPlayerCard();
+    renderNav();
     setStatus('');
     themeChartDefaults();
     applyFilters(false);
-    switchTab(S.tab);
+    switchTab(!S.tab || ['home', 'settings'].includes(S.tab) ? 'overview' : S.tab);
+    $('#username').blur();
     restoreScan(username);
   } catch (e) {
     console.error(e);
@@ -113,54 +105,25 @@ async function restoreScan(username) {
   runScan(cached);
 }
 
-function initTheme() {
-  const saved = store.get('cl:theme');
-  if (saved) document.documentElement.dataset.theme = saved;
-  $('#themeToggle').addEventListener('click', () => {
-    const isDark = document.documentElement.dataset.theme === 'dark' ||
-      (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
-    const next = isDark ? 'light' : 'dark';
-    document.documentElement.dataset.theme = next;
-    store.set('cl:theme', next);
-    themeChartDefaults();
-    if (S.games.length) renderTab(S.tab);
-    if (review.analysis) drawEvalChart();
-    if (review.game) drawReview();
-  });
-}
-
 // Welcome page: Morphy's Opera Game final position, and a way into the arena or the puzzles without loading anyone
 function initWelcome() {
   new BoardView($('#heroBoard')).set({ fen: '1n1Rkb1r/p4ppp/4q3/4p1B1/4P3/8/PPP2PPP/2K5 b k - 1 17', orientation: 'white', lastMove: { from: 'd1', to: 'd8' } });
 
-  const guest = tab => {
-    document.body.classList.add('guest');
-    $('#welcome').classList.add('hidden');
-    $('#app').classList.remove('hidden');
-    switchTab(tab);
-  };
-  $('#guestArena').onclick = () => guest('arena');
-  $('#guestTrain').onclick = () => guest('puzzles');
-}
-
-function initSound() {
-  const b = $('#soundToggle'), show = () => b.classList.toggle('off', !Sound.on());
-  show();
-  b.addEventListener('click', () => { Sound.toggle(); show(); Sound.play('move'); });
+  $('#guestArena').onclick = () => switchTab('arena');
+  $('#guestTrain').onclick = () => switchTab('puzzles');
 }
 
 function init() {
-  initTheme();
-  initSound();
+  initShell();
   initWelcome();
   initReview();
   themeChartDefaults();
   $('#loadForm').addEventListener('submit', e => { e.preventDefault(); loadUser($('#username').value); });
   ['#fTime', '#fColor', '#fRated'].forEach(s => $(s).addEventListener('change', () => { gamesState.page = 0; applyFilters(); }));
-  $$('#tabs button').forEach(b => b.addEventListener('click', () => switchTab(lastInSection[b.dataset.sec] || firstTab(b.dataset.sec))));
   // the username box starts empty: nothing is remembered between launches (?user=<name> still pre-loads one)
   store.set('cl:lastUser', null);
   const qp = new URLSearchParams(location.search).get('user');
+  switchTab('home');
   if (qp) { $('#username').value = qp; loadUser(qp); }
 }
 

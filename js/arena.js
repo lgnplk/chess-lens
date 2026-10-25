@@ -344,7 +344,7 @@ function drawMatchResult(full) {
       <div class="muted small" id="arSbNote" style="text-align:center;margin:6px 0 14px"></div>
       <div class="grid cols-2">
         <div class="card"><div class="row-between"><h3 id="arWatchTitle"></h3><span class="muted small">click a game to watch it</span></div>
-          <div class="match-board" style="--bs:min(360px, calc(100vw - 80px))"><div class="board" id="arBoard"></div></div>
+          <div class="match-board" style="--bs:min(360px, calc(var(--cw) - 80px))"><div class="board" id="arBoard"></div></div>
           <div class="var-line small" id="arMoves"></div></div>
         <div class="card"><h3>Games</h3><div class="table-wrap" style="max-height:470px;overflow-y:auto"><table><thead><tr><th>#</th><th>White</th><th>Black</th><th>Result</th><th class="num">Moves</th><th>Ended by</th><th>Opening</th></tr></thead><tbody id="arRows"></tbody></table></div></div>
       </div>`;

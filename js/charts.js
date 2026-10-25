@@ -4,7 +4,7 @@ const TC_SLOT = { bullet: '--s1', blitz: '--s2', rapid: '--s3', daily: '--s4' };
 
 function themeChartDefaults() {
   Chart.defaults.font.family = '"Source Sans 3", "Segoe UI", system-ui, sans-serif';
-  Chart.defaults.font.size = 11;
+  Chart.defaults.font.size = 12;
   Chart.defaults.color = cssVar('--muted');
   Chart.defaults.borderColor = cssVar('--grid');
   Object.assign(Chart.defaults.plugins.legend.labels, { usePointStyle: true, pointStyle: 'circle', boxWidth: 8, boxHeight: 8, padding: 14 });

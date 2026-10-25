@@ -426,7 +426,7 @@ function drawBlDrill(A) {
     box.innerHTML = `<div class="row-between"><div><h3>Blunder drill</h3><div class="sub bl-sub"></div></div><div class="seg bl-modes" style="align-self:center"></div></div>
       <p class="small bl-score" style="margin:8px 0 0"></p>
       <div class="twin-stage bl-stage"><div><div class="muted small bl-meta" style="margin-bottom:6px"></div>
-        <div class="match-board" style="--bs:min(380px, calc(100vw - 60px))"><div class="board" id="blBoard"></div></div></div>
+        <div class="match-board" style="--bs:min(380px, calc(var(--cw) - 60px))"><div class="board" id="blBoard"></div></div></div>
         <div class="twin-panel bl-panel"></div></div>`;
     bdrill.board = new BoardView($('#blBoard', box), { onMove: (mv, fenAfter) => blDrillAnswer(mv, fenAfter) });
     bdrill.shownKey = null;

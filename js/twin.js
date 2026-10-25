@@ -173,7 +173,7 @@ function drawTwin() {
     const r = twin.reveal;
     stage += `<div class="twin-stage">
       <div><div class="muted small" style="margin-bottom:6px">Position ${twin.i + 1} of ${twin.set.length} · <span class="pill">${item.kind === 'yours' ? 'from your games' : 'never seen'}</span> · ${esc(item.meta)}</div>
-        <div class="match-board" style="--bs:min(400px, calc(100vw - 60px))"><div class="board" id="twinBoard"></div></div>
+        <div class="match-board" style="--bs:min(400px, calc(var(--cw) - 60px))"><div class="board" id="twinBoard"></div></div>
         <div class="var-line small" style="margin-top:6px">${hist} <b>· ${toMove} to move</b></div></div>
       <div class="twin-panel">${r ? twinRevealHtml(r, m) : `<h3>${toMove} to move — what do you play?</h3>`}</div>
     </div>`;
