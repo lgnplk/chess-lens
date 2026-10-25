@@ -4,7 +4,7 @@
 
 // ---------- settings ----------
 const SET_KEY = 'cl:settings:v1';
-const SET_DEFAULTS = { theme: 'system', accent: '', headings: 'serif', scale: 1.1, board: 'theme', pieces: 'cburnett', coords: true, dots: true, anim: 'normal', volume: 0.8, sidebar: 'full' };
+const SET_DEFAULTS = { theme: 'system', accent: '', headings: 'serif', scale: 1.1, board: 'theme', pieces: 'cburnett', coords: true, dots: true, anim: 'normal', volume: 0.8, sounds: 'wood', sidebar: 'full', boardSize: 0 };
 const settings = { ...SET_DEFAULTS, ...store.get(SET_KEY, {}) };
 
 // swatch: page, surface, accent, ink, light square, dark square (the CSS holds the full token sets)
@@ -46,7 +46,11 @@ function applySettings() {
   document.body.classList.toggle('hide-dots', !settings.dots);
   document.body.classList.toggle('sb-mini', settings.sidebar === 'mini');
   BOARD_ANIM_MS = ANIM_MS[settings.anim] ?? 200;
+  if (settings.boardSize) setBoardSize(settings.boardSize);
+  else { st.removeProperty('--bs-user'); document.body.classList.remove('bs-user'); }
   SOUND_VOL = settings.volume;
+  SOUND_SET = SOUND_SETS[settings.sounds] ? settings.sounds : 'wood';
+  Sound.preload(SOUND_SET);
   PIECE_IMG = `https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/piece/${PIECE_SETS.includes(settings.pieces) ? settings.pieces : 'cburnett'}/`;
   applyZoom();
   syncTitleBar();
@@ -142,8 +146,12 @@ function onNavigate(prev, tab) {
   $('#navFwd').disabled = !hist.fwd.length;
   // the filters (time control, colour, rated) belong to pages that read your loaded games
   $('#filters').classList.toggle('hidden', !S.username || !FILTER_TABS.includes(tab));
+  // what the pinned filters cover, for anything pinned under them
+  setTimeout(measureFilters, 0);
   $('#app').scrollTop = 0;
 }
+function measureFilters() { const f = $('#filters'); document.documentElement.style.setProperty('--filters-h', f.classList.contains('hidden') ? '0px' : Math.max(0, f.offsetHeight - 22) + 'px'); }
+window.addEventListener('resize', () => setTimeout(measureFilters, 0));
 const FILTER_TABS = ['overview', 'analytics', 'report', 'games', 'openings', 'insights'];
 function histGo(dir) {
   const from = dir < 0 ? hist.back : hist.fwd, to = dir < 0 ? hist.fwd : hist.back, t = from.pop();
@@ -286,6 +294,7 @@ function renderSettings(sec) {
     </div>
     <div class="card"><h3>${icon('volume-2')} Sound</h3>
       <div class="set-row"><div class="set-label">Sounds</div><div class="set-toggles"><label class="set-toggle"><input type="checkbox" id="setSound" ${Sound.on() ? 'checked' : ''}><span>Moves, captures and results</span></label></div></div>
+      <div class="set-row"><div class="set-label">Set</div><div>${seg('sounds', Object.entries(SOUND_SETS))}<div class="muted small" style="margin-top:6px">Wood is made by the app; the others are lichess's recordings (Enigmahack, AGPL-3.0).</div></div></div>
       <div class="set-row"><div class="set-label">Volume</div><div class="set-scale"><input type="range" id="setVol" min="0.1" max="1" step="0.05" value="${settings.volume}"><b>${Math.round(settings.volume * 100)}%</b></div></div>
     </div>
     <div class="card"><h3>${icon('command')} Shortcuts</h3>
@@ -300,7 +309,7 @@ function renderSettings(sec) {
   _setBoard = new BoardView($('#setBoard', sec), { onMove: () => {} });
   _setBoard.jump({ fen: 'r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3', orientation: 'white', lastMove: { from: 'f1', to: 'c4' }, arrows: [{ from: 'g8', to: 'f6', color: cssVar('--good'), width: 0.18 }] });
   _setBoard.select('d7');
-  $$('[data-set]', sec).forEach(b => b.onclick = () => { const k = b.dataset.set, v = b.dataset.val; setSetting(k, k === 'scale' || k === 'volume' ? +v : v); });
+  $$('[data-set]', sec).forEach(b => b.onclick = () => { const k = b.dataset.set, v = b.dataset.val; setSetting(k, k === 'scale' || k === 'volume' ? +v : v); if (k === 'sounds') setTimeout(() => Sound.play('move'), 250); });
   $$('[data-set-check]', sec).forEach(c => c.onchange = () => setSetting(c.dataset.setCheck, c.checked));
   $('#setAccent', sec).oninput = e => { e.target.parentElement.style.background = e.target.value; };
   $('#setAccent', sec).onchange = e => setSetting('accent', e.target.value);
@@ -313,3 +322,34 @@ function renderSettings(sec) {
   $('#setSound', sec).onchange = e => { if (Sound.on() !== e.target.checked) Sound.toggle(); renderAppbar(); if (e.target.checked) Sound.play('move'); };
   $('#setReset', sec).onclick = () => { for (const k of Object.keys(settings)) delete settings[k]; Object.assign(settings, SET_DEFAULTS); setSetting('theme', SET_DEFAULTS.theme); renderNav(); };
 }
+
+// ---------- resizable boards ----------
+// Each board page's layout (.rv: the board, then its panel) gets a divider: drag it to size the board (the panel takes
+// the rest), double-click to return to the automatic size. One size for every such page, kept with the settings.
+function addSplitters() {
+  for (const rv of $$('.rv:not([data-split])')) {
+    const panel = rv.querySelector(':scope > .rv-panel');
+    if (!rv.querySelector(':scope > .rv-board') || !panel) continue;
+    rv.dataset.split = '1';
+    const h = document.createElement('div');
+    h.className = 'rv-split'; h.title = 'Drag to resize the board · double-click for automatic';
+    rv.insertBefore(h, panel);
+    h.onpointerdown = e => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const left = rv.querySelector('.board').getBoundingClientRect().left;
+      try { h.setPointerCapture(e.pointerId); } catch { /* the pointer is already gone */ }
+      h.classList.add('dragging'); document.body.classList.add('resizing');
+      const move = ev => setBoardSize(ev.clientX - left - 10);
+      h.addEventListener('pointermove', move);
+      h.addEventListener('pointerup', () => { h.removeEventListener('pointermove', move); h.classList.remove('dragging'); document.body.classList.remove('resizing'); store.set(SET_KEY, settings); }, { once: true });
+    };
+    h.ondblclick = () => setSetting('boardSize', 0);
+  }
+}
+function setBoardSize(px) {
+  settings.boardSize = Math.round(clamp(px, 240, 1600));
+  document.documentElement.style.setProperty('--bs-user', settings.boardSize + 'px');
+  document.body.classList.add('bs-user');
+}
+new MutationObserver(() => { clearTimeout(addSplitters.t); addSplitters.t = setTimeout(addSplitters, 50); }).observe(document.getElementById('app'), { childList: true, subtree: true });

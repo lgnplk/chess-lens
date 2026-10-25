@@ -30,7 +30,7 @@ function renderPuzzles(sec) {
     sec.innerHTML = `<div class="card">
       <div class="row-between"><div><h3>Puzzles</h3><div class="sub">From lichess's public puzzle database: real positions, tested by thousands of players.</div></div><div class="seg pz-modes"></div></div>
       <div class="twin-stage"><div><div class="muted small pz-meta" style="margin-bottom:6px"></div>
-        <div class="match-board" style="--bs:min(440px, calc(var(--cw) - 60px))"><div class="board" id="pzBoard"></div></div></div>
+        <div class="match-board" style="--bs:min(var(--train-bs), calc(var(--cw) - 60px))"><div class="board" id="pzBoard"></div></div></div>
         <div class="twin-panel pz-panel"></div></div></div>`;
     pz.board = new BoardView($('#pzBoard', sec), { onMove: (mv, fenAfter) => pzAnswer(mv, fenAfter) });
   }

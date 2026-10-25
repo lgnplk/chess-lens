@@ -58,7 +58,11 @@ player stay locked until one is loaded; Review, Explorer, Editor, Insights, Trai
 - **Settings** (kept on this computer): theme (Match Windows, Chess book, Paper, Night, Slate, Tournament hall,
   Midnight), accent colour (or any colour), book-serif or clean-sans headings, interface size (85–160%, 110% by
   default), sidebar; board squares (theme, wood, brown, green, blue, ice, purple, grey, coral, olive), 17 piece sets
-  (lichess's), coordinates, legal-move dots, piece motion (off to slow); sounds and their volume.
+  (lichess's), coordinates, legal-move dots, piece motion (off to slow); sound set (Wood, made by the app, or lichess's
+  SFX, Piano, NES and Futuristic recordings by Enigmahack, AGPL-3.0) and volume.
+- **Board pages** (Review, Play, Editor, Explorer, Vision, Prepare, Your bot) have a divider between the board and
+  its panel: drag it to size the board, double-click for automatic. Messages appear as toasts in the corner; on long
+  pages the filters (and Insights' jump links) stay pinned under the app bar.
 
 Icons are a few of Lucide's (lucide.dev, ISC), kept in `js/icons.js`. Copy is kept to a minimum.
 

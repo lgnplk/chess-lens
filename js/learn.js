@@ -71,7 +71,7 @@ async function renderLearn(sec) {
       <div class="card learn-stage-card">
         <div class="twin-stage" style="margin-top:0">
           <div><div class="muted small learn-meta" style="margin-bottom:6px"></div>
-            <div class="match-board" style="--bs:min(420px, calc(var(--cw) - 60px))"><div class="board" id="learnBoard"></div></div></div>
+            <div class="match-board" style="--bs:min(var(--train-bs), calc(var(--cw) - 60px))"><div class="board" id="learnBoard"></div></div></div>
           <div class="twin-panel learn-panel"></div>
         </div>
       </div>`;

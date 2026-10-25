@@ -23,11 +23,20 @@ const GUEST_TABS = ['home', 'settings', 'play', 'arena', 'insights', 'puzzles', 
 const firstTab = sec => !S.username
   ? GUEST_TABS.find(t => SECTIONS[sec].some(([x]) => x === t)) || SECTIONS[sec][0][0] : SECTIONS[sec][0][0];
 
+// Messages float in the corner: progress stays while it runs, errors until dismissed, plain notes fade by themselves
+let _statusTimer = null;
 function setStatus(msg, isError = false) {
   const s = $('#status');
+  clearTimeout(_statusTimer);
   if (!msg) { s.classList.add('hidden'); s.innerHTML = ''; return; }
   s.classList.remove('hidden'); s.classList.toggle('error', isError);
   if (isError) s.innerHTML = msg; else showStatus(s, msg);
+  if (!s.querySelector(':scope > .st-close')) {
+    s.insertAdjacentHTML('beforeend', `<button class="st-close" title="Dismiss">${icon('x', 14)}</button>`);
+    s.querySelector(':scope > .st-close').onclick = () => setStatus('');
+  }
+  const plain = String(msg).replace(/<[^>]+>/g, '').trim();
+  if (!isError && statusFraction(msg) == null && !/(…|\.\.\.)$/.test(plain)) _statusTimer = setTimeout(() => setStatus(''), 4500);
 }
 
 function applyFilters(render = true) {
@@ -36,6 +45,11 @@ function applyFilters(render = true) {
   $('#fCount').textContent = `${S.filtered.length} of ${S.games.length} games`;
   // the one time-control picker: every page reads it (counts honour the colour and rated filters)
   const base = filterBase();
+  // colour and rated: segmented like the time control (the selects behind them keep the values)
+  const segOf = (id, sel, opts) => { $(id).innerHTML = opts.map(([v, l]) => `<button data-fv="${v}" class="${$(sel).value === v ? 'active' : ''}">${l}</button>`).join('');
+    $$(`${id} [data-fv]`).forEach(b => b.onclick = () => { const f = $(sel); f.value = b.dataset.fv; f.dispatchEvent(new Event('change')); }); };
+  segOf('#fColorSeg', '#fColor', [['all', 'Both'], ['white', 'White'], ['black', 'Black']]);
+  segOf('#fRatedSeg', '#fRated', [['all', 'All'], ['rated', 'Rated']]);
   $('#fTimeSeg').innerHTML = TC_ORDER.map(tc => [tc, tc === 'all' ? base.length : base.filter(g => g.timeClass === tc).length]).filter(([tc, n]) => tc === 'all' || n || tc === t)
     .map(([tc, n]) => `<button data-ftc="${tc}" class="${tc === t ? 'active' : ''}">${tc === 'all' ? 'All' : tcTitle(tc)} <span class="seg-n">${n}</span></button>`).join('');
   $$('#fTimeSeg [data-ftc]').forEach(b => b.onclick = () => { const f = $('#fTime'); f.value = b.dataset.ftc; f.dispatchEvent(new Event('change')); });
@@ -73,6 +87,7 @@ async function loadUser(username) {
   const months = +$('#months').value;
   const btn = $('#loadForm button');
   btn.disabled = true;
+  $('#playerChip').innerHTML = `<span class="sb-loading"><span class="spinner"></span><span class="sb-label">Loading ${esc(username)}…</span></span>`;
   try {
     PLAYER_CACHE.delete(`${username}:${months}`); // an explicit load always fetches fresh games
     const { player, games } = await loadPlayerData(username, months, setStatus);
@@ -88,6 +103,7 @@ async function loadUser(username) {
     restoreScan(username);
   } catch (e) {
     console.error(e);
+    renderPlayerCard();
     setStatus(e.message || String(e), true);
   } finally {
     btn.disabled = false;

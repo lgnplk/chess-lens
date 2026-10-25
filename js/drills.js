@@ -24,7 +24,7 @@ function renderDrills(sec) {
       <div><h3>Drills</h3><div class="sub">Standard checkmates and endgames against Stockfish at full strength.</div></div>
       <div class="dr-list"></div>
       <div class="twin-stage dr-stage hidden"><div><div class="muted small dr-meta" style="margin-bottom:6px"></div>
-        <div class="match-board" style="--bs:min(440px, calc(var(--cw) - 60px))"><div class="board" id="drBoard"></div></div></div>
+        <div class="match-board" style="--bs:min(var(--train-bs), calc(var(--cw) - 60px))"><div class="board" id="drBoard"></div></div></div>
         <div class="twin-panel dr-panel"></div></div></div>`;
     dr.board = new BoardView($('#drBoard', sec), { onMove: (mv, fenAfter) => drMove(mv, fenAfter) });
   }

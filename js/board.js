@@ -303,7 +303,7 @@ class BoardView {
     this.el.classList.toggle('fresh', moved); // highlight/check fade in only when the position changed, not on every redraw
     if (moved) {
       this.anims = this.planAnims(prev.grid, grid, flip, now);
-      if (this.anims?.length) Sound.play(this.anims.some(a => a.kind === 'out') ? 'capture' : 'move');
+      if (this.anims?.length) Sound.play(checkSq ? 'check' : this.anims.some(a => a.kind === 'out') ? 'capture' : 'move');
     }
     else if (prev && prev.flip !== flip) this.anims = null;
     // a redraw mid-animation (live engine lines, a click) picks each animation up where it was
@@ -361,23 +361,55 @@ class BoardView {
 let BOARD_ANIM_MS = 200;
 let SOUND_VOL = 1;
 
-// Board sounds, synthesised (no audio files): a short wooden tap for a move, a heavier double tap for a capture,
-// and two notes for a drill verdict. The header's speaker button turns them off (remembered).
+// Board sounds. "Wood" is synthesised (no files): a felted piece set down on a wooden board, a bright click over a
+// low, quickly damped body, doubled for a capture; verdicts are two soft mallet notes. The other sets are lichess's
+// recordings (by Enigmahack, AGPL-3.0 like this app), fetched once from jsDelivr. The app bar's speaker turns sound
+// off; Settings picks the set and the volume.
+const SOUND_SETS = { wood: 'Wood', sfx: 'SFX', piano: 'Piano', nes: 'NES', futuristic: 'Futuristic' };
+let SOUND_SET = 'wood';
 const Sound = (() => {
   let ctx = null;
+  const FILES = { move: 'Move', capture: 'Capture', check: 'Check', good: 'Confirmation', bad: 'Error', win: 'Victory', lose: 'Defeat' };
+  const cache = new Map();   // "set/kind" → decoded sound (or the promise of one)
   const on = () => store.get('cl:sound') !== 'off';
-  const tap = (c, t, freq, gain) => {
-    const n = Math.floor(c.sampleRate * 0.07), buf = c.createBuffer(1, n, c.sampleRate), d = buf.getChannelData(0);
-    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n) ** 5;
+  const audio = () => (ctx ||= new (window.AudioContext || window.webkitAudioContext)());
+  const out = c => { const g = c.createGain(); g.gain.value = SOUND_VOL; g.connect(c.destination); return g; };
+  // a piece set down: a click (noise through a band, 18 ms) over the board's body (two sines, damped, gliding down)
+  const knock = (c, t, body, click, gain) => {
+    const dst = out(c), n = Math.floor(c.sampleRate * 0.018), buf = c.createBuffer(1, n, c.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n) ** 4;
     const src = c.createBufferSource(), bp = c.createBiquadFilter(), g = c.createGain();
-    src.buffer = buf; bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 1.4; g.gain.value = gain * SOUND_VOL;
-    src.connect(bp).connect(g).connect(c.destination); src.start(t);
+    src.buffer = buf; bp.type = 'bandpass'; bp.frequency.value = click; bp.Q.value = 0.9; g.gain.value = gain * 0.6;
+    src.connect(bp).connect(g).connect(dst); src.start(t);
+    for (const [mul, amp, dur] of [[1, 0.55, 0.09], [2.7, 0.2, 0.05]]) {
+      const o = c.createOscillator(), og = c.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(body * mul, t); o.frequency.exponentialRampToValueAtTime(body * mul * 0.82, t + dur);
+      og.gain.setValueAtTime(0, t); og.gain.linearRampToValueAtTime(gain * amp, t + 0.002); og.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(og).connect(dst); o.start(t); o.stop(t + dur + 0.02);
+    }
   };
-  const tone = (c, t, freq, dur, gain) => {
-    const o = c.createOscillator(), g = c.createGain();
-    o.type = 'sine'; o.frequency.value = freq;
-    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(gain * SOUND_VOL, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g).connect(c.destination); o.start(t); o.stop(t + dur + 0.02);
+  // a soft mallet note: the fundamental and a marimba's overtone (×3.9), which dies away first
+  const note = (c, t, f, gain, dur = 0.5) => {
+    const dst = out(c);
+    for (const [mul, amp, d] of [[1, 1, dur], [3.9, 0.25, dur * 0.3]]) {
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = 'sine'; o.frequency.value = f * mul;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(gain * amp, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(g).connect(dst); o.start(t); o.stop(t + d + 0.02);
+    }
+  };
+  const synth = (c, kind, t) => {
+    if (kind === 'move') knock(c, t, 210, 2400, 0.9);
+    else if (kind === 'capture') { knock(c, t, 175, 2000, 1); knock(c, t + 0.045, 240, 2600, 0.7); }
+    else if (kind === 'check') { knock(c, t, 210, 2400, 0.9); note(c, t + 0.03, 1318.5, 0.05, 0.25); }
+    else if (kind === 'good' || kind === 'win') { note(c, t, 659.3, 0.16); note(c, t + 0.09, 987.8, 0.14, 0.6); }
+    else if (kind === 'bad' || kind === 'lose') { note(c, t, 392, 0.14, 0.4); note(c, t + 0.11, 311.1, 0.13, 0.5); }
+  };
+  const recording = (c, set, kind) => {
+    const key = set + '/' + kind;
+    if (!cache.has(key)) cache.set(key, fetch(`https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/sound/${set}/${FILES[kind]}.mp3`)
+      .then(r => (r.ok ? r.arrayBuffer() : Promise.reject())).then(b => c.decodeAudioData(b)).then(b => (cache.set(key, b), b)).catch(() => null));
+    return cache.get(key);
   };
   return {
     on,
@@ -385,15 +417,16 @@ const Sound = (() => {
     play(kind) {
       if (!on()) return;
       try {
-        const c = ctx ||= new (window.AudioContext || window.webkitAudioContext)();
+        const c = audio();
         if (c.state === 'suspended') c.resume();
-        const t = c.currentTime + 0.005;
-        if (kind === 'move') tap(c, t, 1500, 0.9);
-        else if (kind === 'capture') { tap(c, t, 1000, 1.2); tap(c, t + 0.035, 1300, 0.7); }
-        else if (kind === 'good') { tone(c, t, 660, 0.14, 0.12); tone(c, t + 0.1, 990, 0.22, 0.12); }
-        else if (kind === 'bad') { tone(c, t, 330, 0.16, 0.12); tone(c, t + 0.12, 247, 0.26, 0.12); }
+        if (SOUND_SET === 'wood' || !FILES[kind]) return synth(c, kind, c.currentTime + 0.005);
+        // a recording not fetched yet (or unreachable) is replaced by the wooden sound this once
+        const r = recording(c, SOUND_SET, kind), go = b => { if (!b) return synth(c, kind, c.currentTime + 0.005); const s = c.createBufferSource(); s.buffer = b; s.connect(out(c)); s.start(); };
+        if (r instanceof AudioBuffer) go(r); else { synth(c, kind, c.currentTime + 0.005); r.then(() => {}); }
       } catch { /* no audio */ }
     },
+    // fetch a set's recordings ahead of their first use
+    preload(set) { if (set !== 'wood' && SOUND_SETS[set]) { try { const c = audio(); for (const k of Object.keys(FILES)) recording(c, set, k); } catch { /* no audio */ } } },
   };
 })();
 const pieceSrc = p => `${PIECE_IMG}${p === p.toUpperCase() ? 'w' : 'b'}${p.toUpperCase()}.svg`;

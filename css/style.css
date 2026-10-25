@@ -1101,3 +1101,98 @@ body.hide-dots .board .dot, body.hide-dots .board .cap { display: none; }
   .set-row, .set-board, .set-board-opts .set-row { grid-template-columns: 1fr; gap: 8px; }
 }
 .sb-ratings span { display: inline-flex; align-items: center; gap: 3px; }
+
+/* =====================================================================================================
+   Modern finish: one kind of control everywhere, softer surfaces, motion that answers every action.
+   (Overrides the older "book" rules above; the themes and serif headings stay.)
+   ===================================================================================================== */
+:root { --ease: cubic-bezier(.2, .8, .2, 1); --shadow-1: 0 1px 2px rgba(0, 0, 0, .06), 0 6px 20px -12px rgba(0, 0, 0, .25); --shadow-2: 0 12px 40px -12px rgba(0, 0, 0, .45); }
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transparent; }
+
+/* segmented controls: a pill track, the chosen option raised on it */
+.seg { display: inline-flex; flex-wrap: nowrap; gap: 2px; padding: 3px; align-self: center; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; box-shadow: none; overflow-x: auto; scrollbar-width: none; max-width: 100%; }
+.seg::-webkit-scrollbar { display: none; }
+.seg button { font: inherit; font-variant: normal; letter-spacing: 0; font-size: 13.5px; font-weight: 500; margin: 0; padding: 5px 12px; border: none; border-radius: 7px; background: none; color: var(--ink-2); white-space: nowrap; flex: none; transition: background-color .16s var(--ease), color .16s, box-shadow .16s; }
+.seg button:hover:not(.active):not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--surface) 55%, transparent); }
+.seg button.active { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(0, 0, 0, .16), 0 0 0 1px var(--border); border-bottom-color: transparent; }
+.seg button:disabled { opacity: .45; cursor: default; }
+.seg .seg-n { font-size: 11.5px; color: var(--muted); margin-left: 4px; font-weight: 500; }
+.rv-tabs { gap: 4px; padding: 6px; border-bottom: 1px solid var(--border); }
+.rv-tabs button { font-variant: normal; letter-spacing: 0; font-size: 13.5px; font-weight: 500; border: none; border-radius: 7px; padding: 6px; transition: background-color .16s, color .16s; }
+.rv-tabs button:hover:not(.active) { background: var(--surface-2); }
+.rv-tabs button.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink); font-weight: 600; }
+
+/* dropdowns: drawn like the rest, with their own chevron */
+select { -webkit-appearance: none; appearance: none; cursor: pointer; padding-right: 30px !important;
+  background-color: var(--surface); background-repeat: no-repeat; background-position: right 10px center; background-size: 12px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); }
+.appbar .loadform select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 6px center; background-size: 11px; padding-right: 22px !important; }
+select:hover, input:hover:not(:focus):not([type=range]):not([type=checkbox]):not([type=color]) { border-color: color-mix(in srgb, var(--ink) 35%, transparent); }
+input, select, textarea { transition: border-color .15s, box-shadow .15s, background-color .15s; }
+input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
+input[type=range] { accent-color: var(--accent); }
+
+/* buttons: they answer the press */
+.btn { transition: background-color .15s, border-color .15s, color .15s, transform .08s var(--ease), box-shadow .15s, filter .15s; }
+.btn:active:not(:disabled) { transform: translateY(1px) scale(.985); }
+.btn.primary { box-shadow: 0 1px 2px rgba(0, 0, 0, .18); }
+.btn.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
+.btn:focus-visible, .seg button:focus-visible, .sb-item:focus-visible, .ab-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sb-item, .ab-btn, .sb-head { transition: background-color .14s, color .14s; }
+
+/* surfaces: lighter edges, a little depth */
+.card { border-color: var(--border); box-shadow: var(--shadow-1); }
+.tile { border-color: var(--border); }
+.tile .label { font-variant: normal; text-transform: uppercase; letter-spacing: .07em; font-size: 11px; color: var(--muted); }
+th { font-variant: normal; text-transform: none; letter-spacing: .01em; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+tbody tr { transition: background-color .12s; }
+.trait-chip { font-variant: normal; letter-spacing: 0; font-size: 12.5px; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: none; background: color-mix(in srgb, currentColor 13%, transparent); }
+.pill { border-radius: 999px; padding: 0 8px; }
+.ins-nav button { transition: background-color .14s, border-color .14s, color .14s; }
+.ins-nav button:hover { background: var(--surface-2); }
+
+/* pages ease in; the sidebar's highlight follows */
+.tab:not(.hidden) { animation: page-in .26s var(--ease); }
+@keyframes page-in { from { opacity: 0; transform: translateY(8px); } }
+.sb-item.active::before { animation: bar-in .22s var(--ease); }
+@keyframes bar-in { from { transform: scaleY(.3); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .tab:not(.hidden), .sb-item.active::before { animation: none; } }
+
+/* messages float in the corner instead of pushing the page down */
+.status { position: fixed; right: 20px; bottom: 20px; z-index: 90; margin: 0; max-width: min(440px, calc(100vw - 40px)); padding: 12px 40px 12px 16px; border-radius: 12px; border: 1px solid var(--border-strong); background: var(--surface); box-shadow: var(--shadow-2); animation: toast-in .24s var(--ease); font-size: 14px; }
+.status.error { border-color: var(--critical); border-left: 4px solid var(--critical); }
+.status .st-close { position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; display: grid; place-items: center; border: none; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+.status .st-close:hover { background: var(--surface-2); color: var(--ink); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(10px) scale(.98); } }
+
+/* loading: a spinner where the player will appear */
+.spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); animation: spin .7s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.sb-loading { display: flex; align-items: center; gap: 10px; color: var(--ink-2); }
+
+/* the divider between a board and its panel: drag to resize, double-click to reset */
+.rv { --panel: var(--panel-user, clamp(300px, calc(var(--cw) * .34), 440px)); }
+.rv-split { flex: none; width: 10px; margin: 0 -8px; align-self: stretch; cursor: col-resize; position: relative; z-index: 3; }
+.rv-split::after { content: ""; position: absolute; left: 4px; top: 30%; bottom: 30%; width: 2px; border-radius: 2px; background: var(--border-strong); opacity: 0; transition: opacity .15s, background-color .15s; }
+.rv:hover > .rv-split::after { opacity: 1; }
+.rv-split:hover::after, .rv-split.dragging::after { opacity: 1; background: var(--accent); }
+body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
+@media (max-width: 760px) { .rv-split { display: none; } }
+
+/* training boards use the room they have */
+:root { --train-bs: clamp(340px, calc(var(--ch) - 230px), 640px); }
+
+/* the filters strip: compact controls on one line */
+#filters { gap: 10px; }
+#filters .seg button { padding: 4px 11px; }
+
+/* board pages: the board from the left, the panel filling the rest (so the divider stays under the pointer) */
+.rv { justify-content: flex-start; }
+.rv-panel { flex: 1 1 var(--panel); min-width: 280px; max-width: 760px; width: auto; }
+@media (min-width: 761px) { body.bs-user .rv, body.bs-user .rv.prep { --bs: clamp(240px, var(--bs-user), min(calc(var(--ch) - 110px), calc(var(--cw) - 370px))); } }
+
+/* long pages: the filters stay pinned under the app bar, and Insights' jump links under them */
+#filters { position: sticky; top: -22px; z-index: 6; margin: -22px -28px 18px; padding: 22px 28px 10px; background: color-mix(in srgb, var(--page) 90%, transparent); backdrop-filter: blur(10px); }
+.ins-nav { position: sticky; top: var(--filters-h, 0px); z-index: 5; margin: -6px -28px 14px; padding: 8px 28px; background: color-mix(in srgb, var(--page) 90%, transparent); backdrop-filter: blur(10px); }
+#insStyle, .h2h-section, [id^="ins"] { scroll-margin-top: calc(var(--filters-h, 0px) + 64px); }
+@media (max-width: 820px) { #filters { margin: -14px -14px 14px; padding: 14px 14px 10px; top: -14px; } .ins-nav { margin-left: -14px; margin-right: -14px; padding: 8px 14px; } }
