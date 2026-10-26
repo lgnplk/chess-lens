@@ -79,7 +79,7 @@ class BoardView {
   down(e) {
     if (this.edit) return this.editDown(e);
     if (this.onSquare && e.button === 0) { const sq = this.squareAt(e); if (sq) this.onSquare(sq); return; }
-    if (e.button === 2) { this.drawFrom = this.squareAt(e); return; }
+    if (e.button === 2) { this.drawFrom = this.squareAt(e); this.drawTo = null; try { this.el.setPointerCapture(e.pointerId); } catch { /* gone */ } return; }
     if (e.button !== 0) return;
     if (this.drawn.arrows.length || this.drawn.circles.length) { this.drawn = { arrows: [], circles: [] }; this.render(); }
     const sq = this.squareAt(e);
@@ -140,6 +140,12 @@ class BoardView {
   }
 
   move(e) {
+    // a right-drag shows its arrow while it is being drawn
+    if (this.drawFrom) {
+      const to = this.squareAt(e), color = arrowColorFor(e);
+      if (to !== this.drawTo || color !== this.drawColor) { this.drawTo = to; this.drawColor = color; this.render(); }
+      return;
+    }
     if (this.paint) {
       const sq = this.squareAt(e);
       if (sq && sq !== this.paint.last) { this.paint.last = sq; this.edit.place(sq, this.paint.tool === 'erase' ? null : this.paint.tool); }
@@ -171,14 +177,17 @@ class BoardView {
   up(e) {
     if (e.button === 2) {
       const from = this.drawFrom, to = this.squareAt(e);
-      this.drawFrom = null;
+      this.drawFrom = null; this.drawTo = null;
       if (from && to) {
-        const color = e.shiftKey ? 'rgba(200, 40, 40, .8)' : 'rgba(21, 120, 27, .8)';
+        // as on chess.com: orange, or red with Shift, blue with Alt, green with Ctrl; the same one again removes it
+        const color = arrowColorFor(e);
         const list = from === to ? this.drawn.circles : this.drawn.arrows;
         const i = list.findIndex(x => x.from === from && x.to === to);
-        if (i >= 0) list.splice(i, 1); else list.push({ from, to, color, width: 0.18, opacity: 1 });
-        this.render();
+        if (i >= 0 && list[i].color === color) list.splice(i, 1);
+        else if (i >= 0) list[i].color = color;
+        else list.push({ from, to, color, width: 0.2, opacity: 1 });
       }
+      this.render();
       return;
     }
     if (this.paint) { this.paint = null; return; }
@@ -287,7 +296,8 @@ class BoardView {
         html += `<div class="${cls.join(' ')}" data-sq="${sq}">${inner}</div>`;
       }
     }
-    html += arrowsSvg([...(arrows || []), ...this.drawn.arrows], flip, this.drawn.circles);
+    const preview = this.drawFrom && this.drawTo && this.drawTo !== this.drawFrom ? [{ from: this.drawFrom, to: this.drawTo, color: this.drawColor, width: 0.2, opacity: 0.75 }] : [];
+    html += arrowsSvg([...(arrows || []), ...this.drawn.arrows, ...preview], flip, this.drawn.circles);
     this.el.innerHTML = html;
     // a redraw mid-drag keeps the lifted piece, its faded twin at home and the outlined target; and a pending promotion choice
     if (this.drag) {
@@ -436,24 +446,43 @@ function sqXY(sq, flip) {
   return [(flip ? 7 - c : c) + 0.5, (flip ? 7 - r : r) + 0.5];
 }
 
-// Each arrow is a shaft and a triangular head in one group, so the head is drawn with the arrow itself. (SVG markers
-// were looked up by id across the whole page: every board after the first got another board's heads, often from a
-// hidden page, so they went missing or took the wrong colour.) The group's opacity keeps the overlap from darkening.
+// Arrows as chess.com draws them: one solid shape (shaft and head outlined together, so nothing overlaps or seams),
+// from the centre of the start square to the centre of the target, the head in proportion to the shaft; a knight's
+// move bends into an L, the long leg first. (No SVG markers: they are looked up by id across the whole page, and
+// boards took each other's.)
+const ARROW_COLORS = { plain: 'rgba(255, 170, 0, 0.82)', shift: 'rgba(235, 60, 50, 0.82)', alt: 'rgba(60, 140, 255, 0.82)', ctrl: 'rgba(110, 185, 60, 0.85)' };
+const arrowColorFor = e => (e.shiftKey ? ARROW_COLORS.shift : e.altKey ? ARROW_COLORS.alt : e.ctrlKey || e.metaKey ? ARROW_COLORS.ctrl : ARROW_COLORS.plain);
+
+function arrowPath(a, flip) {
+  const [x1, y1] = sqXY(a.from, flip), [x2, y2] = sqXY(a.to, flip), dx = x2 - x1, dy = y2 - y1;
+  const w = a.width ?? 0.2, h = w / 2, hl = clamp(2.3 * w, 0.32, 0.5), hw = hl * 0.66;
+  const knight = (Math.abs(dx) === 1 && Math.abs(dy) === 2) || (Math.abs(dx) === 2 && Math.abs(dy) === 1);
+  // the centre line: start, (the L's corner,) tip; then its last stretch's direction and normal
+  const pts = knight ? [[x1, y1], Math.abs(dx) === 2 ? [x2, y1] : [x1, y2], [x2, y2]] : [[x1, y1], [x2, y2]];
+  const [px, py] = pts.at(-2), len = Math.hypot(x2 - px, y2 - py), ux = (x2 - px) / len, uy = (y2 - py) / len, nx = -uy, ny = ux;
+  const bx = x2 - ux * hl, by = y2 - uy * hl;   // where the head starts
+  const f = n => +n.toFixed(3), P = (x, y) => `${f(x)},${f(y)}`;
+  let left = [], right = [];
+  if (knight) {
+    const [cx, cy] = pts[1], l1 = Math.hypot(cx - x1, cy - y1), n1x = -(cy - y1) / l1, n1y = (cx - x1) / l1;
+    left = [P(x1 + n1x * h, y1 + n1y * h), P(cx + (n1x + nx) * h, cy + (n1y + ny) * h)];
+    right = [P(cx - (n1x + nx) * h, cy - (n1y + ny) * h), P(x1 - n1x * h, y1 - n1y * h)];
+  } else {
+    left = [P(x1 + nx * h, y1 + ny * h)];
+    right = [P(x1 - nx * h, y1 - ny * h)];
+  }
+  const head = [P(bx + nx * h, by + ny * h), P(bx + nx * hw, by + ny * hw), P(x2, y2), P(bx - nx * hw, by - ny * hw), P(bx - nx * h, by - ny * h)];
+  return `M${[...left, ...head, ...right].join(' L')} Z`;
+}
+
 function arrowsSvg(arrows, flip, circles = []) {
   if (!arrows.length && !circles.length) return '';
   let s = '<svg class="arrows" viewBox="0 0 8 8">';
   for (const a of arrows) {
     if (!a.from || !a.to || a.from === a.to) continue;
-    const [x1, y1] = sqXY(a.from, flip), [x2, y2] = sqXY(a.to, flip);
-    const w = a.width ?? 0.2, len = Math.hypot(x2 - x1, y2 - y1), ux = (x2 - x1) / len, uy = (y2 - y1) / len;
-    const hl = Math.max(0.34, 3 * w), hw = Math.max(0.17, 1.5 * w);   // head length and half-width
-    const tx = x2 - ux * (0.42 - 1.4 * w), ty = y2 - uy * (0.42 - 1.4 * w);   // tip, short of the square's centre
-    const bx = tx - ux * hl, by = ty - uy * hl;
-    const f = n => +n.toFixed(3);
-    s += `<g opacity="${a.opacity ?? 0.85}"><line x1="${f(x1)}" y1="${f(y1)}" x2="${f(bx)}" y2="${f(by)}" stroke="${a.color}" stroke-width="${w}" stroke-linecap="round"/>`
-      + `<polygon points="${f(tx)},${f(ty)} ${f(bx - uy * hw)},${f(by + ux * hw)} ${f(bx + uy * hw)},${f(by - ux * hw)}" fill="${a.color}"/></g>`;
+    s += `<path d="${arrowPath(a, flip)}" fill="${a.color}" opacity="${a.opacity ?? 0.85}" stroke-linejoin="round"/>`;
   }
-  circles.forEach(c => { const [x, y] = sqXY(c.from, flip); s += `<circle cx="${x}" cy="${y}" r="0.44" fill="none" stroke="${c.color}" stroke-width="0.07"/>`; });
+  circles.forEach(c => { const [x, y] = sqXY(c.from, flip); s += `<circle cx="${x}" cy="${y}" r="0.45" fill="none" stroke="${c.color}" stroke-width="0.075" opacity="${c.opacity ?? 1}"/>`; });
   return s + '</svg>';
 }
 

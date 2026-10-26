@@ -250,7 +250,7 @@ function edDraw() {
   const last = playing && ed.idx ? (() => { const m = edChess(ed.idx - 1).move(ed.line[ed.idx - 1]); return { from: m.from, to: m.to }; })() : null;
   const cards = ed.results.filter(r => r.fen === fen);
   const arrows = [];
-  if (cards[0] && !problem) cards[0].rows.slice(0, 4).forEach((m, i) => arrows.push({ from: m.uci.slice(0, 2), to: m.uci.slice(2, 4), color: cssVar(i ? '--s1' : '--good'), width: i ? 0.12 : 0.2, opacity: i ? Math.max(0.35, Math.min(0.8, (m.p ?? 0.5) * 1.5)) : 1 }));
+  if (cards[0] && !problem) cards[0].rows.slice(0, 4).forEach((m, i) => arrows.push({ from: m.uci.slice(0, 2), to: m.uci.slice(2, 4), color: cssVar(i ? '--s1' : '--good'), width: i ? 0.15 : 0.22, opacity: i ? Math.max(0.5, Math.min(0.8, (m.p ?? 0.5) * 1.5)) : 0.9 }));
   // edits show at once (no slides or sounds); played moves slide as anywhere else
   ed.board[playing ? 'set' : 'jump']({ fen, orientation, lastMove: last, arrows });
   // palettes: the colour at the top of the board above it
