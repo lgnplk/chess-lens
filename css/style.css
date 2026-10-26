@@ -1196,3 +1196,13 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .ins-nav { position: sticky; top: var(--filters-h, 0px); z-index: 5; margin: -6px -28px 14px; padding: 8px 28px; background: color-mix(in srgb, var(--page) 90%, transparent); backdrop-filter: blur(10px); }
 #insStyle, .h2h-section, [id^="ins"] { scroll-margin-top: calc(var(--filters-h, 0px) + 64px); }
 @media (max-width: 820px) { #filters { margin: -14px -14px 14px; padding: 14px 14px 10px; top: -14px; } .ins-nav { margin-left: -14px; margin-right: -14px; padding: 8px 14px; } }
+
+/* rating forecast (Summary) */
+.fc-card { margin-bottom: 14px; }
+.fc-body { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 24px; align-items: center; margin-top: 10px; }
+.fc-n { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--ink-2); }
+.fc-n input[type=range] { width: 140px; }
+.fc-big { font-family: var(--serif); font-size: 52px; font-weight: 600; line-height: 1.05; margin-top: 8px; font-variant-numeric: lining-nums tabular-nums; }
+.fc-range { color: var(--ink-2); }
+.fc-chart { height: 230px; }
+@media (max-width: 900px) { .fc-body { grid-template-columns: 1fr; } }

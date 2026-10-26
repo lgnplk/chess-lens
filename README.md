@@ -66,6 +66,15 @@ player stay locked until one is loaded; Review, Explorer, Editor, Insights, Trai
 
 Icons are a few of Lucide's (lucide.dev, ISC), kept in `js/icons.js`. Copy is kept to a minimum.
 
+## Rating forecast
+
+On Summary (`js/forecast.js`): where your rating is likely to be after another N games (10–500) in a time control,
+with a fan chart. The trend is the recent slope of your rating (a game 50 back counts half), fading by whichever of a
+few rates (none, half-life ~23, ~70 or ~140 games, lasting) would have forecast your own past best, 10 to 200 games
+ahead; the 50% and 90% ranges are how far those back-forecasts actually missed (recent ones counting most), fitted
+as variance = c0 + c1·N. Your history in that time control (up to 1,000 games) is fetched when the loaded period
+holds fewer than 300; at your recent pace the card also gives the date. Needs 60+ rated games.
+
 ## Training
 
 - **Puzzles** (`js/puzzles.js`): 37,892 puzzles from lichess's public-domain puzzle database
@@ -152,6 +161,7 @@ Maia-3 is AGPL-3.0: if you give the app to other people, offer them the source (
 | `js/insights.js` | Aggregates: overview, openings, habits, style profile, analytics, engine-scan stats, report rules |
 | `js/shell.js` | App shell: sidebar, app bar, history, command palette, shortcuts, settings and themes |
 | `js/icons.js` | The interface's icons (Lucide, as SVG strings) |
+| `js/forecast.js` | Rating forecast: trend and ranges tested on your own history |
 | `js/views.js` | Tab renderers and charts |
 | `js/review.js` | Game review: board, variations, live lines, coach, eval graph |
 | `js/sources.js` | Game sources: chess.com accounts, chess.com titled lists, Lichess exports, PGN Mentor OTB careers; shared picker UI |
