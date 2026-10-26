@@ -186,7 +186,7 @@ function ladderShrink(T, a, side) {
 }
 const ratingWord = r => (r >= RATING_MAX ? `${RATING_MAX}+` : (Math.round(r / 50) * 50).toLocaleString());
 
-const ladderState = { tc: null, band: null, cmp: null };
+const ladderState = { tc: null, band: null, cmp: null, perfRaw: store.get('cl:perfRaw', false) };
 
 function ladderTcTabs(tcs, cur, attr) {
   return `<div class="seg">${tcs.map(tc => `<button ${attr}="${tc}" class="${tc === cur ? 'active' : ''}">${tcTitle(tc)}</button>`).join('')}</div>`;
@@ -327,9 +327,13 @@ function spreadOf(q) {
   const sd = (q[15] - q[5]) / 1.349;
   return sd > 0 ? sd : (q[18] - q[2]) / 2.563 > 0 ? (q[18] - q[2]) / 2.563 : 1;
 }
+// A performance value as the radar, its tooltip and the bars all show it: by default the estimate of the player's
+// level (a short record pulled toward the typical player of their rating by the share of it that could be luck:
+// 25 games of accuracy swing about ±4 points, players of one rating differ by about ±1), or exactly as measured.
+const perfShown = (s, a) => (ladderState.perfRaw ? s.vals?.[a.key] : ladderShrink(s.T, a, s));
 function seriesValue(side, a, scale) {
   const q = side.T.quantiles[a.key];
-  const v = scale === 'rating' ? ladderShrink(side.T, a, side) : side.vals?.[a.key];
+  const v = scale === 'rating' ? perfShown(side, a) : side.vals?.[a.key];
   if (!q || v == null) return null;
   const z = (v - q[10]) / spreadOf(q);
   return a.invert ? -z : z;
@@ -349,21 +353,23 @@ function shapePane(el, canvasId, barsCls, axes, series, scale) {
   const z = series.map(s => axes.map(a => seriesValue(s, a, scale)));
   const reach = axes.map((_, i) => Math.max(RADAR_MIN_SPREADS, 1.08 * Math.max(0, ...z.map(r => Math.abs(r[i] ?? 0)))));
   const pts = z.map(r => r.map((x, i) => (x == null ? null : 50 + 50 * x / reach[i])));
+  // what is plotted, and (when the estimate moved it) what was measured
+  const shown = (s, a) => (perf ? perfShown(s, a) : s.vals?.[a.key]);
+  const said = (s, a) => { const v = s.vals[a.key], e = shown(s, a); return Math.abs(e - v) < 0.05 ? a.fmt(v) : `≈${a.fmt(e)} estimated · measured ${a.fmt(v)}`; };
   const tip = (a, s) => {
-    const v = s.vals[a.key];
-    if (v == null) return `${s.label}: –`;
-    const like = perf ? ratingPhrase(s.T, a, ladderShrink(s.T, a, s)) : '';
-    return `${s.label}: ${a.fmt(v)}${like ? ` · ${like}` : ''}`;
+    if (s.vals[a.key] == null) return `${s.label}: –`;
+    const like = perf ? ratingPhrase(s.T, a, shown(s, a)) : '';
+    return `${s.label}: ${said(s, a)}${like ? ` · ${like}` : ''}`;
   };
   radarChart($('#' + canvasId, el), axes.map(a => a.label), series.map((s, i) => ({ label: s.label, data: pts[i], slot: s.slot, dashed: s.dashed })),
     { tooltip: c => tip(axes[c.dataIndex], series[c.datasetIndex]) });
   const [you, other] = series;
   if (!other) { slot(el, barsCls).innerHTML = ''; return; }
-  // bar length: the gap in spreads; the number: the gap in the measure's own units
+  // bar length: the gap in spreads; the number: the gap in the measure's own units (between the plotted values)
   const rows = axes.map((a, i) => ({ a, i })).filter(({ i }) => z[0][i] != null && z[1][i] != null).map(({ a, i }) => {
-    const d = you.vals[a.key] - other.vals[a.key];
+    const d = shown(you, a) - shown(other, a);
     return { label: a.label, diff: (z[0][i] - z[1][i]) * 12.5, text: `${d >= 0 ? '+' : '−'}${a.cell(Math.abs(d)).replace(/^±/, '')}`,
-      tip: `${you.label} ${a.fmt(you.vals[a.key])} · ${other.label} ${a.fmt(other.vals[a.key])}`, faded: PERF_KEYS.has(a.key) && (you.n?.[a.key] ?? 99) < 15 };
+      tip: `${you.label} ${said(you, a)} · ${other.label} ${said(other, a)}`, faded: PERF_KEYS.has(a.key) && (you.n?.[a.key] ?? 99) < 15 };
   });
   rows.sort(perf ? (x, y) => y.diff - x.diff : (x, y) => Math.abs(y.diff) - Math.abs(x.diff));
   slot(el, barsCls).innerHTML = `<div class="muted small" style="margin-bottom:4px">${esc(you.label)} against ${esc(other.label)}</div>` + divergingBars(rows, perf);
@@ -379,7 +385,7 @@ const SHAPE_BODY = `<div class="grid cols-2 shape-grid">
       <div class="muted small pane-note">Middle ring: the median player · differences, not scores</div>
     </div>
     <div class="shape-pane perf-pane">
-      <span class="pane-title">Performance</span>
+      <div class="row-between"><span class="pane-title">Performance</span><span class="perf-mode"></span></div>
       <div class="sub perf-sub"></div>
       <div class="chart-box radar shape-radar perf-radar"><canvas id="perfRadar"></canvas></div>
       <div class="shape-bars perf-bars"></div>
@@ -477,8 +483,13 @@ async function fillShapeCard(el) {
   const sub = slot(el, 'perf-sub');
   if (mine) {
     sub.textContent = notShownPerf.length ? `Not shown until analysed: ${notShownPerf.join(', ')}` : '';
+    // estimate (luck allowed for) or as measured: the radar, tooltips and bars all follow
+    slot(el, 'perf-mode').innerHTML = `<div class="seg" title="Estimate: a short record is pulled toward the typical player of its rating, by how much of it could be luck">${[['est', 'Estimate'], ['raw', 'As measured']].map(([k, l]) => `<button data-perf-mode="${k}" class="${(ladderState.perfRaw ? 'raw' : 'est') === k ? 'active' : ''}">${l}</button>`).join('')}</div>`;
+    slot(el, 'perf-note').textContent = ladderState.perfRaw ? 'Middle ring: the median player · outward is better · exactly as measured, luck included'
+      : 'Middle ring: the median player · outward is better · few games are pulled toward the typical player of their rating';
     shapePane(el, 'perfRadar', 'perf-bars', PERF_RADAR, perfSeries, 'rating');
   } else {
+    slot(el, 'perf-mode').innerHTML = '';
     slot(el, 'perf-bars').innerHTML = '';
     sub.textContent = S.scanAgg ? `Scan some ${myTc} games to see this.` : 'Scan your games to see this.';
   }
@@ -488,6 +499,7 @@ async function fillShapeCard(el) {
 function bindShape(el) {
   const stack = ladderState.stack || [], at = e => stack[+e.target.closest('[data-sr]').dataset.sr];
   $$('[data-shape-view]', el).forEach(b => b.onclick = () => { ladderState.view = b.dataset.shapeView; fillShapeCard(el); });
+  $$('[data-perf-mode]', el).forEach(b => b.onclick = () => { ladderState.perfRaw = b.dataset.perfMode === 'raw'; store.set('cl:perfRaw', ladderState.perfRaw); fillShapeCard(el); });
   $('.sr-mytc', el)?.addEventListener('change', e => { ladderState.myTc = e.target.value; fillShapeCard(el); });
   $$('.sr-x', el).forEach(b => b.onclick = () => { stack.splice(+b.dataset.srx, 1); fillShapeCard(el); });
   $$('.sr-band', el).forEach(s => s.onchange = e => { at(e).band = +e.target.value; fillShapeCard(el); });

@@ -124,8 +124,10 @@ blitz and rapid, built once by `tools/build-ladder.js` (52,462 players) and ship
 - **Where it shows.** Insights: the Shape radars (you vs a band's typical player, or a chess.com player with your
   record against them) and By rating. Both radars place each value by its distance from the median player of its time
   control, in units of how much players really differ; each axis stretches to its most extreme value, so outliers
-  (a legend's brilliance) stay visible. Performance values are first pulled toward the typical player of the band
-  when the sample is small; tooltips give the value and the rating whose typical player matches it.
+  (a legend's brilliance) stay visible. Performance values are by default estimates: a short record is pulled toward the typical player of
+  its rating by the share of it that could be luck (25 games of accuracy swing about ±4 points; players of one rating
+  differ by about ±1). **Estimate / As measured** switches the radar, tooltips and bars together; the tooltip gives the
+  estimate beside the measured value and the rating whose typical player matches it.
   A chess.com player can be shown in any time control they have 10+ games in on their account: when the loaded
   period holds fewer, their latest 100 games of it are fetched month by month back from now. A slider picks how many
   of their games to analyse (up to all of them, at most 500 per run), fetching more when needed.
