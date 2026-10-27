@@ -349,7 +349,7 @@ function cmpRecord(item) {
     </tbody></table></div></div>`;
 }
 
-// Style radar geometry (the performance radar is a rating scale: eloScale below). Each value is placed by how far it
+// Style radar geometry (the performance radar is a rating scale: ELO_SCALE below). Each value is placed by how far it
 // sits from the median player of its time control, in units of
 // how much players really differ there (the ladder's population quantiles: median q50, spread (q75 − q25)/1.349;
 // inverted where fewer is better), so a distance on the radar is a real difference in play: not a percentile,
@@ -374,45 +374,45 @@ function seriesValue(side, a, scale) {
   const z = (v - q[10]) / spreadOf(q);
   return a.invert ? -z : z;
 }
-// "plays like a typical 1,450", or past the strongest band's typical player (where the rating is extrapolated)
-function ratingPhrase(T, a, v) {
-  const pts = ladderCurve(T, a), y = a.invert ? -v : v;
-  if (pts.length < 2) return '';
-  const r = ladderRatingOf(T, a, v);
-  if (r == null) return '';
-  return y > pts.at(-1)[1] ? `beyond the strongest band's typical player: about ${ratingWord(r)} by extrapolation` : `plays like a typical ${ratingWord(r)}`;
-}
 
 // The performance radar is a rating scale: each value is placed at the rating whose typical player (in that series'
-// time control) scores the same, from 0 at the centre to the rim, the next clean step (100, 250, 500 or 1,000: at most
-// 8 rings) above the highest value shown. Beyond the strongest band the rating is extrapolated from the last bands'
-// slope (at most RATING_MAX).
-const ELO_STEPS = [100, 250, 500, 1000];
-function eloScale(values) {
-  const top = Math.max(0, ...values.filter(v => v != null));
-  const step = ELO_STEPS.find(s => Math.floor(top / s) + 1 <= 8) || 1000;
-  return { step, max: (Math.floor(top / step) + 1) * step };
-}
+// time control) scores the same, linear from 0 at the centre to 3,000 at the rim (the clean step above the strongest
+// rapid band's typical player, about 2,800). A value past the rim is drawn on it; one past even the strongest band's
+// typical player as well (where the rating could only be extrapolated: Morphy's brilliance) is an anomaly; both are
+// drawn as stars on the rim and named under the radar.
+const ELO_SCALE = { max: 3000, step: 500 };
+const pastEveryBand = (T, a, v) => { const pts = ladderCurve(T, a); return v != null && pts.length > 1 && (a.invert ? -v : v) > pts.at(-1)[1]; };
 
 // one pane: all the series on one radar; the bars compare you with the first of the others, in real units
 function shapePane(el, canvasId, barsCls, axes, series, scale) {
   const perf = scale === 'rating';
   // performance: ratings (linear); style: distance from the median player in spreads, each axis stretched to its extreme
   const elo = perf ? series.map(s => axes.map(a => { const v = perfShown(s, a); return v == null ? null : ladderRatingOf(s.T, a, v); })) : null;
+  // past every band: an extrapolated rating; over the rim: drawn on it as a star (the anomaly)
+  const past = perf ? series.map(s => axes.map(a => pastEveryBand(s.T, a, perfShown(s, a)))) : null;
+  const odd = perf ? elo.map(r => r.map(x => x != null && x > ELO_SCALE.max)) : null;
   const z = perf ? elo : series.map(s => axes.map(a => seriesValue(s, a, scale)));
   const reach = axes.map((_, i) => Math.max(RADAR_MIN_SPREADS, 1.08 * Math.max(0, ...z.map(r => Math.abs(r[i] ?? 0)))));
-  const pts = perf ? elo : z.map(r => r.map((x, i) => (x == null ? null : 50 + 50 * x / reach[i])));
-  const scaleElo = perf ? eloScale(elo.flat()) : null;
+  const pts = perf ? elo.map(r => r.map(x => (x == null ? null : Math.min(x, ELO_SCALE.max)))) : z.map(r => r.map((x, i) => (x == null ? null : 50 + 50 * x / reach[i])));
   // what is plotted, and (when the estimate moved it) what was measured
   const shown = (s, a) => (perf ? perfShown(s, a) : s.vals?.[a.key]);
   const said = (s, a) => { const v = s.vals[a.key], e = shown(s, a); return Math.abs(e - v) < 0.05 ? a.fmt(v) : `≈${a.fmt(e)} estimated · measured ${a.fmt(v)}`; };
-  const tip = (a, s) => {
-    if (s.vals[a.key] == null) return `${s.label}: –`;
-    const like = perf ? ratingPhrase(s.T, a, shown(s, a)) : '';
-    return `${s.label}: ${said(s, a)}${like ? ` · ${like}` : ''}`;
+  // hover: two short lines, the rating, then the value (and what was measured, when the estimate moved it)
+  const tip = (a, s, si, ai) => {
+    const v = s.vals[a.key];
+    if (v == null) return `${s.label}: –`;
+    if (!perf) return `${s.label}: ${a.fmt(v)}`;
+    const e = shown(s, a), r = elo[si][ai], ex = past[si][ai];
+    const where = odd[si][ai] ? (ex ? '★ beyond every rating band' : `★ ≈${ratingWord(r)}, past the rim`) : ex ? `≈${ratingWord(r)} (extrapolated)` : `≈${ratingWord(r)}`;
+    const val = x => a.cell(x) + (a.unit?.startsWith('/') ? ' ' + a.unit : '');
+    return [`${s.label}: ${where}`, Math.abs(e - v) < 0.05 ? val(v) : `${val(e)} est. · ${a.cell(v)} measured`];
   };
-  radarChart($('#' + canvasId, el), axes.map(a => a.label), series.map((s, i) => ({ label: s.label, data: pts[i], slot: s.slot, dashed: s.dashed })),
-    { tooltip: c => tip(axes[c.dataIndex], series[c.datasetIndex]), elo: scaleElo });
+  radarChart($('#' + canvasId, el), axes.map(a => a.label), series.map((s, i) => ({ label: s.label, data: pts[i], slot: s.slot, dashed: s.dashed, marks: odd?.[i] })),
+    { tooltip: c => tip(axes[c.dataIndex], series[c.datasetIndex], c.datasetIndex, c.dataIndex), elo: perf ? ELO_SCALE : null });
+  if (perf) {
+    const notes = series.flatMap((s, si) => axes.map((a, ai) => (odd[si][ai] ? { t: `${s.label}'s ${a.label.toLowerCase()} (${a.cell(shown(s, a))})`, ex: past[si][ai] } : null)).filter(Boolean));
+    slot(el, 'perf-anom').innerHTML = notes.length ? `<span class="anom-star">★</span> Off the scale: ${esc(notes.map(n => n.t).join(', '))}, ${notes.every(n => n.ex) ? 'past even the strongest rating band\'s typical player' : `beyond ${ELO_SCALE.max.toLocaleString()}`}` : '';
+  }
   const [you, other] = series;
   if (!other) { slot(el, barsCls).innerHTML = ''; return; }
   // performance: the gap in rating points (bar and number); style: the gap in spreads, numbered in the measure's units
@@ -439,6 +439,7 @@ const SHAPE_BODY = `<div class="grid cols-2 shape-grid">
       <div class="row-between"><span class="pane-title">Performance</span><span class="perf-mode"></span></div>
       <div class="sub perf-sub"></div>
       <div class="chart-box radar shape-radar perf-radar"><canvas id="perfRadar"></canvas></div>
+      <div class="small perf-anom"></div>
       <div class="shape-bars perf-bars"></div>
       <div class="muted small pane-note perf-note">Rings: rating · each value at the rating whose typical player scores the same</div>
     </div>

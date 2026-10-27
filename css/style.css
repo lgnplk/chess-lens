@@ -1196,3 +1196,6 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .ins-nav { position: sticky; top: var(--filters-h, 0px); z-index: 5; margin: -6px -28px 14px; padding: 8px 28px; background: color-mix(in srgb, var(--page) 90%, transparent); backdrop-filter: blur(10px); }
 #insStyle, .h2h-section, [id^="ins"] { scroll-margin-top: calc(var(--filters-h, 0px) + 64px); }
 @media (max-width: 820px) { #filters { margin: -14px -14px 14px; padding: 14px 14px 10px; top: -14px; } .ins-nav { margin-left: -14px; margin-right: -14px; padding: 8px 14px; } }
+.perf-anom { text-align: center; color: var(--ink-2); margin: 2px 0 6px; }
+.perf-anom:empty { display: none; }
+.anom-star { color: var(--brass-bright); font-size: 15px; }

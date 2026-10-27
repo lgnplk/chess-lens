@@ -126,9 +126,10 @@ blitz and rapid, built once by `tools/build-ladder.js` (52,462 players) and ship
   plays 20, 40 or 80 games against Maia-3 of its own strength and is measured from them like a player, so it stands
   beside the person it imitates (no clocks: no time trouble). The **Performance** radar is a rating scale, linear from
   0 at the centre: each value sits at the rating whose typical player (in that series' time control) scores the same,
-  so a band's typical player is a regular polygon at its rating; the rim is the next clean step (100, 250, 500 or 1,000,
-  at most 8 rings) above the highest value shown. Past the strongest band the rating is extrapolated from the last
-  bands' slope, up to 3,500. The **Style** radar (habits: different, not better) places each value by its distance from
+  so a band's typical player is a regular polygon at its rating; the rim is 3,000 (the clean step above the strongest
+  rapid band's typical player, about 2,800). Past the strongest band the rating is extrapolated from the last bands'
+  slope (up to 3,500); a value beyond the rim is drawn on it as a star and named under the radar (Morphy's brilliance:
+  past every band's typical player). Hovering a point gives the rating, then the value. The **Style** radar (habits: different, not better) places each value by its distance from
   the median player of its time control, in units of how much players really differ, each axis stretched to its most
   extreme value. Performance values are by default estimates: a short record is pulled toward the typical player of
   its rating by the share of it that could be luck (25 games of accuracy swing about ±4 points; players of one rating
