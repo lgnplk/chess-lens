@@ -28,7 +28,6 @@ function renderOverview(sec, games) {
   const a = ov.all;
   const st = ov.streak;
   sec.innerHTML = `${ratingTiles()}
-    <div class="card fc-card" id="fcCard"></div>
     <div class="tiles">
       ${tile('Games', a.n, `${a.w}W · ${a.d}D · ${a.l}L`)}
       ${tile('Score', pct(a.score, 1), `${signed(a.over)} vs rating expectation`)}
@@ -55,7 +54,6 @@ function renderOverview(sec, games) {
     ${(() => { const hl = computeHighlights(games); S._hl = hl; return hl.length ? `<h2 class="h2h-section">Highlights</h2><div class="highlights">${hl.map((h, i) => `<button class="highlight" data-hl="${i}" ${h.game ? '' : 'disabled'}><span class="hl-title">${h.title}</span><span class="hl-value">${esc(h.value)}</span><span class="hl-detail">${esc(h.detail)}</span></button>`).join('')}</div>` : ''; })()}`;
 
   $$('[data-hl]', sec).forEach(b => b.onclick = () => { const h = S._hl[+b.dataset.hl]; if (h?.game) openReview(h.game); });
-  renderForecast($('#fcCard', sec));
 
   // rating chart
   const asc = [...games].sort((x, y) => x.endTs - y.endTs);
