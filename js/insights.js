@@ -253,7 +253,6 @@ function aggregateScan(results) {
   myMoves.filter(m => m.cls === 'blunder' || m.cls === 'mistake').forEach(m => { blunderPieces[m.piece] = (blunderPieces[m.piece] || 0) + 1; });
   const movesPerPiece = {};
   myMoves.forEach(m => { movesPerPiece[m.piece] = (movesPerPiece[m.piece] || 0) + 1; });
-  const winning = perGame.filter(p => p.maxEval >= 300);
   const losing = perGame.filter(p => p.minEval <= -300);
   const byOpening = [...groupBy(perGame, p => `${p.game.color}|${p.game.family}`)].map(([k, ps]) => ({ name: k.slice(k.indexOf('|') + 1), color: ps[0].game.color, n: ps.length, acc: mean(ps.map(p => p.acc)), score: mean(ps.map(p => scoreOf(p.game))) }))
     .sort((a, b) => b.n - a.n);
@@ -264,7 +263,6 @@ function aggregateScan(results) {
   return {
     n: perGame.length, nMoves: myMoves.length, myMoves, perGame, phaseStats, phaseVs, pressure, blunderPieces, movesPerPiece, totals, brilliantCheck,
     acc: mean(perGame.map(p => p.acc)), oppAcc: mean(perGame.map(p => p.oppAcc)), acpl: mean(perGame.map(p => p.acpl)),
-    conversion: { n: winning.length, score: winning.length ? mean(winning.map(p => scoreOf(p.game))) : null },
     defense: { n: losing.length, score: losing.length ? mean(losing.map(p => scoreOf(p.game))) : null },
     byOpening, byTC,
     style: { me: aggregateStyle(recsMe), opp: aggregateStyle(recsOpp) }, brilliantMoves,

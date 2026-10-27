@@ -109,7 +109,7 @@ blitz and rapid, built once by `tools/build-ladder.js` (52,462 players) and ship
   50 games of habits and 20 games through Stockfish 19 (depth 12, top 3 lines: the app's own scan). Both sides of
   every game count, so each band holds thousands of players.
 - **What is measured.** Style: checks, captures, pawn moves, early castling, early queen, time trouble.
-  Performance: accuracy, blunders, conversion (score from +3), resilience (score from −3), brilliance (sound
+  Performance: accuracy, blunders, resilience (score from −3), brilliance (sound
   sacrifices taken and hard refutations found), consistency (game-to-game swing in accuracy) and clutch (only
   moves found), each counted exactly as the app counts your scanned games.
 - **Noise removed.** A player's numbers from a few games are their real level plus luck. The game-to-game swing is

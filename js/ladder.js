@@ -25,7 +25,6 @@ const LADDER_STYLE = [
 const LADDER_PERF = [
   ladderAxis('accuracy', 'Accuracy', v => num(v, 1) + '%', ''),
   ladderAxis('blunders', 'Few blunders', v => num(v, 1), '/100 moves', { row: 'Blunders', invert: true }),
-  ladderAxis('conversion', 'Conversion', v => num(v, 0) + '%', 'scored from +3'),
   ladderAxis('resilience', 'Resilience', v => num(v, 0) + '%', 'scored from −3'),
   ladderAxis('brilliance', 'Brilliance', v => num(v, 0) + '%', 'sound sacs and hard refutations found'),
   ladderAxis('consistency', 'Consistency', v => '±' + num(v, 1), 'accuracy, game to game', { row: 'Game-to-game swing', invert: true }),
@@ -58,7 +57,7 @@ function ladderPerf(agg, tc) {
   if (!pg.length) return null;
   const S1 = f => sum(pg.map(f)), counted = S1(p => p.myCounted || 0);
   const accs = pg.map(p => p.acc), m = mean(accs);
-  const win = pg.filter(p => p.maxEval >= 300), lose = pg.filter(p => p.minEval <= -300);
+  const lose = pg.filter(p => p.minEval <= -300);
   const score = list => 100 * mean(list.map(p => scoreOf(p.game)));
   const [ck, cn] = [0, 1].map(i => S1(p => p.myCrit?.[i] || 0)), [bk, bn] = [0, 1].map(i => S1(p => p.myBril?.[i] || 0));
   const enough = pg.length >= 3 && counted >= 20;
@@ -66,13 +65,12 @@ function ladderPerf(agg, tc) {
     vals: {
       accuracy: enough ? ladderCalibrate('accuracy', m) : null,
       blunders: enough ? ladderCalibrate('blunders', 100 * S1(p => p.myBl || 0) / counted) : null,
-      conversion: win.length >= 5 ? score(win) : null,
       resilience: lose.length >= 5 ? score(lose) : null,
       brilliance: bn >= 10 ? 100 * bk / bn : null,
       consistency: pg.length >= 8 ? Math.sqrt(sum(accs.map(x => (x - m) ** 2)) / (pg.length - 1)) : null,
       clutch: cn >= 10 ? 100 * ck / cn : null,
     },
-    n: { accuracy: pg.length, blunders: counted, conversion: win.length, resilience: lose.length, brilliance: bn, consistency: pg.length, clutch: cn },
+    n: { accuracy: pg.length, blunders: counted, resilience: lose.length, brilliance: bn, consistency: pg.length, clutch: cn },
   };
 }
 
@@ -171,7 +169,7 @@ function ladderRatingOf(T, a, v) {
   return Math.max(0, Math.min(RATING_MAX, r));
 }
 // A measured value is a player's level plus luck. On the rating scale a little luck moves a measure that changes
-// slowly with rating (conversion, brilliance) by hundreds of points, so a player's value is first pulled toward
+// slowly with rating (brilliance) by hundreds of points, so a player's value is first pulled toward
 // the typical player of their own band by the share of its spread that is luck: true spread (sdPlayers) against
 // sampling error (sdGame per game or chance, over n). Consistency is a spread itself: its error is about
 // SD·√(0.75/(n−1)) (excess kurtosis near 1). A band's typical player is already a true level.
