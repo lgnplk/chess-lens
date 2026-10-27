@@ -121,8 +121,10 @@ blitz and rapid, built once by `tools/build-ladder.js` (52,462 players) and ship
 - **Radar scale.** Each axis is a percentile among all chess.com players of that time control: bands are weighted
   by chess.com's published rating distribution (`tools/rating-dist.json`). "Few blunders" and consistency are
   inverted (fewer, smaller swings = outward).
-- **Where it shows.** Insights: the Shape radars (you vs a band's typical player, or a chess.com player with your
-  record against them) and By rating. Both radars place each value by its distance from the median player of its time
+- **Where it shows.** Insights: the Shape radars (you vs a band's typical player, a chess.com player with your record
+  against them, a legend, or a bot) and By rating. A bot (a legend's, one of your arena bots, or the Your bot page's)
+  plays 20, 40 or 80 games against Maia-3 of its own strength and is measured from them like a player, so it stands
+  beside the person it imitates (no clocks: no time trouble). Both radars place each value by its distance from the median player of its time
   control, in units of how much players really differ; each axis stretches to its most extreme value, so outliers
   (a legend's brilliance) stay visible. Performance values are by default estimates: a short record is pulled toward the typical player of
   its rating by the share of it that could be luck (25 games of accuracy swing about ±4 points; players of one rating

@@ -209,11 +209,13 @@ function divergingBars(rows, goodBad, unit = 1) {
 }
 
 // ---------- the comparison: a stack of radars ----------
-// You, plus up to five others on the same radars: the typical player of any rating band, chess.com players, and
-// the legends (their classical over-the-board games). Each is read on its own time control's ladder, so your blitz
-// can stand beside someone's rapid; a legend is placed on the rapid ladder by default (the closest to classical).
+// You, plus up to five others on the same radars: the typical player of any rating band, chess.com players, the
+// legends (their classical over-the-board games), and bots (games they play for the purpose: does a bot play like its
+// player?). Each is read on its own time control's ladder, so your blitz can stand beside someone's rapid; a legend
+// or bot is placed on the rapid ladder by default (the closest to classical; a bot built from one time control, on that).
 // ladderState.stack: [{ kind: 'band', tc, band } | { kind: 'player', user, label, data, tc, agg, aggTc, aggN, run }
-//   | { kind: 'legend', id, label, data, tc, agg, aggN, run }]; null until changed (then: your band's typical player)
+//   | { kind: 'legend' | 'bot', id, label, data, tc, agg, aggN, run, nGames? }]; null until changed (then: your band's
+//   typical player)
 const STACK_MAX = 5, STACK_SLOTS = ['--s2', '--s3', '--s4', '--s5', '--s6'];
 // Insights rebuilds its page now and then (a scan finishing, a filter); a download or analysis that finishes later
 // draws on the card on screen, not the one it started from
@@ -222,7 +224,8 @@ const AN_MAX = 500;   // the most games one Analyze runs (the slider's top)
 const stackPlayers = () => (ladderState.stack || []).filter(s => s.kind !== 'band' && s.data);
 // how many games a chess.com player has played in a time control, over the whole account (their stats page)
 const acctGames = (it, tc) => { const r = it.data?.player?.stats?.['chess_' + tc]?.record; return r ? (r.win || 0) + (r.loss || 0) + (r.draw || 0) : 0; };
-const stackPool = it => it.data.games.filter(g => (g.plies ?? g.sans.length) >= 10 && (it.kind === 'legend' || g.timeClass === it.tc));
+const ownGames = it => it.kind === 'legend' || it.kind === 'bot';   // all their games count, not one time control's
+const stackPool = it => it.data.games.filter(g => (g.plies ?? g.sans.length) >= 10 && (ownGames(it) || g.timeClass === it.tc));
 
 // A player is first loaded for the header's period, which may hold few games (or none) of the time control you
 // pick for them; then their games of that time control are fetched month by month back from now until there are
@@ -252,6 +255,13 @@ async function addToStack(el, item) {
   if (st.length >= STACK_MAX) return;
   st.push(item);
   if (item.kind === 'band') return fillShapeCard(el);
+  if (item.kind === 'bot') {
+    Object.assign(item, { loading: true, msg: 'building the bot…' });
+    fillShapeCard(el);
+    try { await stackBotGames(el, item); } catch (e) { item.error = e.message || String(e); }
+    item.loading = false;
+    return fillShapeCard(el);
+  }
   const src = item.kind === 'legend' ? famousSource(FAMOUS.find(f => f.id === item.id)) : { kind: 'chesscom', user: item.user, months: S.months };
   Object.assign(item, { loading: true, msg: 'Loading…' });
   fillShapeCard(el);
@@ -259,6 +269,31 @@ async function addToStack(el, item) {
   catch (e) { item.error = e.message || String(e); }
   item.loading = false;
   fillShapeCard(el);
+}
+
+// A bot's own games, for its radars: it plays a plain Maia-3 opponent of its own strength (the kind of player it would
+// meet), colours alternating, through the arena's match engine; then it is measured as a legend is (all its games;
+// no clocks, so no time trouble). Legends, your arena bots, and the Your bot page's bot.
+async function stackBotGames(el, item) {
+  const note = m => { item.msg = String(m).replace(/<[^>]+>/g, ''); const s = $(`[data-sr="${ladderState.stack.indexOf(item)}"] .sr-load`, shapeLive(el)); if (s) s.textContent = item.msg; };
+  let bot;
+  if (item.id === 'yourbot') {
+    if (!botv.model) throw new Error('build a bot on Bots › Your bot first');
+    bot = Object.assign(Object.create(botv.model), { label: botv.model.label, mode: 'sample', guard: { moves: 0, flagged: 0, kept: 0 } });
+  } else bot = await ensureBot(item.id, note);
+  const opp = { label: 'Maia', maia: bot.maia, playRating: bot.playRating, trees: { white: new Map(), black: new Map() }, mode: 'sample' };
+  let done = 0;
+  note(`playing ${item.nGames} games…`);
+  const games = await playGames(Array.from({ length: item.nGames }, (_, i) => (i % 2 ? { white: opp, black: bot } : { white: bot, black: opp })), bot.maia,
+    { onGameEnd: () => note(`playing: ${++done} of ${item.nGames} games done…`), shouldAbort: () => !ladderState.stack?.includes(item) });
+  const t = Math.floor(Date.now() / 1000);
+  item.data = { label: item.label, games: games.map((g, i) => {
+    const color = g.white === bot ? 'white' : 'black', won = g.result === (color === 'white' ? '1-0' : '0-1');
+    return { id: `botgame:${hashStr(`${item.label}|${color}|${g.sans.join(' ')}`)}`, sans: [...g.sans], plies: g.sans.length, clocks: [], base: null, color, rated: true, timeClass: '*',
+      me: { name: item.label, rating: bot.playRating }, opp: { name: 'Maia', rating: bot.playRating }, result: g.result === '1/2-1/2' ? 'draw' : won ? 'win' : 'loss', reason: g.reason,
+      opening: '', eco: '', url: null, end: new Date((t - games.length + i) * 1000), endTs: t - games.length + i };
+  }) };
+  item.rating = bot.playRating;
 }
 
 // their engine numbers: Stockfish over their latest n games (in the chip's time control; all of a legend's),
@@ -431,11 +466,11 @@ async function fillShapeCard(el) {
     }
     const name = esc(it.label || it.user || FAMOUS.find(f => f.id === it.id)?.name || '');
     if (!it.data) {
-      chips.push(`<span class="sr-chip" data-sr="${i}"><i style="background:var(${color})"></i>${name} <span class="muted small">${it.error ? `<span style="color:var(--critical)">${esc(it.error)}</span>` : esc(it.msg || 'loading…')}</span>${x}</span>`);
+      chips.push(`<span class="sr-chip" data-sr="${i}"><i style="background:var(${color})"></i>${name} <span class="muted small sr-load">${it.error ? `<span style="color:var(--critical)">${esc(it.error)}</span>` : esc(it.msg || 'loading…')}</span>${x}</span>`);
       return;
     }
     let m, tcs = tcsAll;
-    if (it.kind === 'legend') { it.tc = has(it.tc) ? it.tc : 'rapid'; m = legendMeasure(it); }
+    if (ownGames(it)) { it.tc = has(it.tc) ? it.tc : 'rapid'; m = legendMeasure(it); }
     else {
       // every time control they have 10+ games in on the account, not only in the loaded period
       const count = tc => Math.max(ladderMeasure(it.data.games, tc)?.games || 0, acctGames(it, tc));
@@ -451,17 +486,18 @@ async function fillShapeCard(el) {
         return;
       }
     }
-    const label = it.kind === 'legend' ? it.label : it.tc !== myTc ? `${it.label} (${it.tc})` : it.label;
+    const label = ownGames(it) ? it.label : it.tc !== myTc ? `${it.label} (${it.tc})` : it.label;
     const s = { ...m, T: L.tc[it.tc], label, slot: color };
     series.push(s);
     if (!hasPerf(s.vals)) notShownPerf.push(label);
     // how many to analyse: any number up to all they have in this time control (more are fetched when needed)
-    const avail = stackPool(it).length, top = Math.max(1, Math.min(AN_MAX, it.kind === 'legend' ? avail : Math.max(avail, acctGames(it, it.tc))));
+    const avail = stackPool(it).length, top = Math.max(1, Math.min(AN_MAX, ownGames(it) ? avail : Math.max(avail, acctGames(it, it.tc))));
     const nPick = clamp(it.lastN || 25, 1, top);
     const engine = it.run ? `<span class="muted small sr-run">${it.run.waiting ? 'waiting for the engine…' : `analyzing ${it.run.done} of ${it.run.n}…`}</span>`
       : it.fetching ? `<span class="muted small sr-load">${esc(it.fetching.msg)}</span>`
-      : `<span class="sr-an-wrap">${it.aggN && it.aggTc === it.tc ? `<span class="muted small">${it.aggN} analysed</span>` : ''}<input type="range" class="sr-n" min="1" max="${top}" value="${nPick}" title="How many of their latest ${it.kind === 'legend' ? '' : it.tc + ' '}games"><span class="small sr-nv">${nPick}</span><button class="btn small-btn sr-an">${it.aggN && it.aggTc === it.tc ? 'Re-analyze' : 'Analyze'}</button></span>`;
-    chips.push(`<span class="sr-chip" data-sr="${i}"><i style="background:var(${color})"></i>${esc(it.label)}${it.kind === 'legend' ? ` <span class="muted small" title="Classical over-the-board games, placed among online players of this time control">classical, as</span>` : ''}${tcSelect('sr-tc', tcs, it.tc)}${engine}${x}</span>`);
+      : `<span class="sr-an-wrap">${it.aggN && it.aggTc === it.tc ? `<span class="muted small">${it.aggN} analysed</span>` : ''}<input type="range" class="sr-n" min="1" max="${top}" value="${nPick}" title="How many of their latest ${ownGames(it) ? '' : it.tc + ' '}games"><span class="small sr-nv">${nPick}</span><button class="btn small-btn sr-an">${it.aggN && it.aggTc === it.tc ? 'Re-analyze' : 'Analyze'}</button></span>`;
+    chips.push(`<span class="sr-chip" data-sr="${i}"><i style="background:var(${color})"></i>${esc(it.label)}${it.kind === 'legend' ? ` <span class="muted small" title="Classical over-the-board games, placed among online players of this time control">classical, as</span>`
+      : it.kind === 'bot' ? ` <span class="muted small" title="Games it played against Maia-3 of its own strength (~${it.rating}), placed among online players of this time control">${it.data.games.length} games vs Maia, as</span>` : ''}${tcSelect('sr-tc', tcs, it.tc)}${engine}${x}</span>`);
   });
   slot(el, 'shape-series').innerHTML = `<span class="sr-chip sr-you"><i style="background:var(--s1)"></i>You${tcSelect('sr-mytc', myTcs, myTc)}</span>
     <span class="muted small">vs</span>${chips.join('')}${stack.length < STACK_MAX ? '<button class="btn small-btn sr-add">+ Add</button>' : ''}`;
@@ -469,7 +505,9 @@ async function fillShapeCard(el) {
   const bands0 = Object.keys(L.tc[myTc].bands).map(Number).sort((a, b) => a - b);
   slot(el, 'sr-addrow').innerHTML = `<span>Typical player ${tcSelect('ad-tc', tcsAll, myTc)}<select class="ad-band">${bands0.map(b => `<option value="${b}" ${b === nearestBand(bands0, you.band + LADDER_BAND) ? 'selected' : ''}>${bandLabel(b)}</option>`).join('')}</select><button class="btn small-btn ad-band-go">Add</button></span>
     <span>Player <input class="ad-user" placeholder="chess.com username" spellcheck="false"><button class="btn small-btn ad-user-go">Add</button></span>
-    <span>Legend <select class="ad-legend">${FAMOUS.map(f => `<option value="${f.id}">${esc(f.name)}</option>`).join('')}</select><button class="btn small-btn ad-legend-go">Add</button></span>`;
+    <span>Legend <select class="ad-legend">${FAMOUS.map(f => `<option value="${f.id}">${esc(f.name)}</option>`).join('')}</select><button class="btn small-btn ad-legend-go">Add</button></span>
+    <span title="The bot plays games against Maia-3 of its own strength; its radars come from those games">Bot <select class="ad-bot"><optgroup label="Legends">${FAMOUS.map(f => `<option value="f:${f.id}">${esc(f.name)}</option>`).join('')}</optgroup>${arena.roster.length ? `<optgroup label="Your arena bots">${arena.roster.map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('')}</optgroup>` : ''}${botv.model ? `<option value="yourbot">${esc(botv.model.label)} (Your bot)</option>` : ''}</select>
+      <select class="ad-botn" title="How many games it plays">${[20, 40, 80].map(n => `<option value="${n}" ${n === 40 ? 'selected' : ''}>${n} games</option>`).join('')}</select><button class="btn small-btn ad-bot-go">Add</button></span>`;
   slot(el, 'cmp-slot').innerHTML = stackPlayers().filter(s => s.kind === 'player').map(cmpRecord).join('');
 
   if (!$('#shapeRadar', el)) body.innerHTML = SHAPE_BODY;
@@ -477,12 +515,14 @@ async function fillShapeCard(el) {
   $$('.shape-bars', el).forEach(x => x.classList.toggle('hidden', view !== 'bars'));
   shapePane(el, 'shapeRadar', 'style-bars', LADDER_STYLE, series, 'pct');
 
-  // performance: the series with engine numbers (your scan; a band's typical player always has them)
-  const perfSeries = series.filter(s => hasPerf(s.vals)), mine = hasPerf(you.vals);
-  slot(el, 'perf-pane').classList.toggle('pending', !mine);
+  // performance: the series with engine numbers (your scan; a band's typical player always has them). Without a scan
+  // of yours the others still show (a legend beside its bot needs no games of yours)
+  const perfSeries = series.filter(s => hasPerf(s.vals)), mine = hasPerf(you.vals), others = perfSeries.length - (mine ? 1 : 0);
+  slot(el, 'perf-pane').classList.toggle('pending', !mine && !others);
   const sub = slot(el, 'perf-sub');
-  if (mine) {
-    sub.textContent = notShownPerf.length ? `Not shown until analysed: ${notShownPerf.join(', ')}` : '';
+  if (mine || others) {
+    const youNote = mine ? '' : S.scanAgg ? `You: scan some ${myTc} games to be shown` : 'You: scan your games to be shown';
+    sub.textContent = [youNote, notShownPerf.length ? `Not shown until analysed: ${notShownPerf.join(', ')}` : ''].filter(Boolean).join(' · ');
     // estimate (luck allowed for) or as measured: the radar, tooltips and bars all follow
     slot(el, 'perf-mode').innerHTML = `<div class="seg" title="Estimate: a short record is pulled toward the typical player of its rating, by how much of it could be luck">${[['est', 'Estimate'], ['raw', 'As measured']].map(([k, l]) => `<button data-perf-mode="${k}" class="${(ladderState.perfRaw ? 'raw' : 'est') === k ? 'active' : ''}">${l}</button>`).join('')}</div>`;
     slot(el, 'perf-note').textContent = ladderState.perfRaw ? 'Middle ring: the median player · outward is better · exactly as measured, luck included'
@@ -524,6 +564,12 @@ function bindShape(el) {
   $('.ad-user-go', row).onclick = addUser;
   $('.ad-user', row).onkeydown = e => { if (e.key === 'Enter') addUser(); };
   $('.ad-legend-go', row).onclick = () => { const f = FAMOUS.find(x => x.id === $('.ad-legend', row).value); row.classList.add('hidden'); addToStack(el, { kind: 'legend', id: f.id, label: f.name, tc: 'rapid' }); };
+  $('.ad-bot-go', row).onclick = () => {
+    const id = $('.ad-bot', row).value, info = id === 'yourbot' ? null : botInfo(id);
+    const name = id === 'yourbot' ? botv.model?.label : info?.name, srcTc = id === 'yourbot' ? botv.model?.tc : info?.src?.tc;
+    row.classList.add('hidden');
+    addToStack(el, { kind: 'bot', id, label: `${name} bot`, nGames: +$('.ad-botn', row).value, tc: LADDER_TCS.includes(srcTc) ? srcTc : 'rapid' });
+  };
 }
 
 // ---------- by rating: the typical player of every band, for any measure ----------
