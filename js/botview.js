@@ -235,10 +235,13 @@ async function maybeBotThink() {
   try {
     dist = await botDistribution(botv.model, botFens());
     if (token !== botv.token) return;
+    const maiaMoves = dist.source === 'maia' ? dist.moves : null;
     if (botv.model.fidelity && dist.source === 'maia') {
       const r = await fidChoose(botv.model, dist.moves, botFens().at(-1), getEnginePool()[0], botv.mode === 'sample' ? 'sample' : 'likely');
       dist = { ...dist, moves: r.ranked, fid: true }; pick = r.move;
     } else pick = await botPick(botv.model, dist, botv.mode, botFens().at(-1), getEnginePool()[0]);
+    // "like them": now and then a move off the shortlist, as often as the player plays one
+    if (maiaMoves && botv.mode === 'sample') pick = withTail(botv.model, maiaMoves, pick);
   } catch (e) { if (token === botv.token) { botv.thinking = false; botv.error = 'The bot failed to move: ' + (e.message || e); refreshBot(); } return; }
   if (token !== botv.token) return;
   botv.dist = dist;

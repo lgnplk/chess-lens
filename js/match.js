@@ -71,15 +71,23 @@ async function playGames(pairs, maia, { onStep, onGameEnd, shouldAbort } = {}) {
         // stronger that it's still favored — a GM down a queen against a beginner plays on
         const lg = Math.log(pred.value / (1 - pred.value)) + (bot.playRating - opp.playRating) * Math.LN10 / 400;
         const withGap = 1 / (1 + Math.exp(-lg));
-        g.lowValue[turn] = pred.value < RESIGN_BELOW && withGap < RESIGN_BELOW ? g.lowValue[turn] + 1 : 0;
-        if (g.lowValue[turn] >= RESIGN_AFTER) { g.result = turn === 'w' ? '0-1' : '1-0'; g.reason = 'resignation'; return; }
+        // (a bot may carry its player's own resigning habit: bot.resign = { below, after })
+        const rb = bot.resign?.below ?? RESIGN_BELOW, ra = bot.resign?.after ?? RESIGN_AFTER;
+        g.lowValue[turn] = pred.value < rb && withGap < rb ? g.lowValue[turn] + 1 : 0;
+        if (g.lowValue[turn] >= ra) { g.result = turn === 'w' ? '0-1' : '1-0'; g.reason = 'resignation'; return; }
         const fen = g.fens.at(-1), engine = engines[j % engines.length];
         let mv, pool;
-        if (bot.fidelity) ({ move: mv, ranked: pool } = await fidChoose(bot, pred.moves, fen, engine, bot.mode === 'likely' ? 'likely' : 'sample'));
+        // fullSample: every move Maia gives any chance, in proportion (a stand-in for real opponents, who now and
+        // then play the wild moves the trimmed sampling below leaves out)
+        if (bot.fullSample) { mv = sampleBy(pred.moves, m => m.p); pool = pred.moves; }
+        else if (bot.fidelity) ({ move: mv, ranked: pool } = await fidChoose(bot, pred.moves, fen, engine, bot.mode === 'likely' ? 'likely' : 'sample'));
         else {
           pool = humanPool(pred.moves, fen);
           mv = await guardMove(bot, fen, bot.mode === 'likely' ? pred.moves[0] : humanSample(pred.moves, fen), pool, engine);
         }
+        // now and then a move from outside the shortlist, as often as the player plays one (after the checks above:
+        // these are the player's own wild moves, which the blunder check must not take away)
+        if (!bot.fullSample && bot.mode !== 'likely') mv = withTail(bot, pred.moves, mv);
         // strong players don't throw a won game into a draw: no stalemate or threefold repetition while clearly winning
         if (bot.playRating >= THROW_GUARD_RATING && pred.value >= 0.85 && drawsGame(g, mv.san)) {
           const alt = [...pool, ...pred.moves].find(m => !drawsGame(g, m.san));

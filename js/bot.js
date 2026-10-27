@@ -180,13 +180,51 @@ async function trainPlayerBot(src, { nGames = 80, tc = 'all', size = '5m', evalu
       onStatus?.('Measuring how often they blunder…', 0.97);
       blunderTarget = await realBlunderRate(games, { shouldAbort, onStatus: m => onStatus?.(m, 0.97) }).catch(() => null);
     }
+    onStatus?.('Measuring their habits outside the model…', 0.98);
+    const { tailRate, resign } = await playerHabits(maia, train, pool, shift, kind, { shouldAbort });
     return {
-      label: data.label, src, kind, tc, gamesTc: data.tc || 'all', size: maia.size, backend: maia.backend, maia, shift, typical: Math.round(typical), playRating, evaluation, blunderTarget, fidelity,
+      label: data.label, src, kind, tc, gamesTc: data.tc || 'all', size: maia.size, backend: maia.backend, maia, shift, typical: Math.round(typical), playRating, evaluation, blunderTarget, fidelity, tailRate, resign,
       stats: { games: games.length, decisions: all.length, train: train.length, test: test.length, poolGames: pool.length },
       trees: { white: buildTree(pool, 'white'), black: buildTree(pool, 'black') },
       games: pool,
     };
   } catch (e) { if (!shared) maia.terminate(); throw e; }
+}
+
+// Two habits a position-by-position model can't show, measured on the player's own games:
+//   tailRate: how often they play a move outside the bot's shortlist (Maia's top 3 and anything it gives ≥0.5%):
+//     a move Maia gave almost no chance, often the wildest blunder. Without it a bot of a club player never plays
+//     one (theirs: 2.6% of moves; the bot's: none), and blunders less than they do.
+//   resign: when they give up, as Maia's estimate of their chances where they resigned (median), for players who
+//     resign at least a quarter of their lost games; others play on. Needs the games' endings (not OTB databases).
+async function playerHabits(maia, decs, games, shift, kind, { shouldAbort } = {}) {
+  const step = Math.max(1, Math.floor(decs.length / 600)), sample = decs.filter((d, i) => i % step === 0).slice(0, 600);
+  const preds = sample.length ? await maia.predict(botItems(sample, shift), { shouldAbort }) : [];
+  const tailRate = sample.length ? sample.filter((d, i) => !fidCandidates(preds[i].moves).some(m => m.uci === d.played)).length / sample.length : 0;
+  if (kind === 'otb') return { tailRate, resign: null };
+  const lost = games.filter(g => g.result === 'loss'), resigned = lost.filter(g => /resign/i.test(g.reason || ''));
+  if (lost.length < 10) return { tailRate, resign: null };
+  const share = resigned.length / lost.length;
+  if (share < 0.25 || resigned.length < 5) return { tailRate, resign: { below: 0.02, after: 4, share } };
+  const finals = resigned.map(g => {
+    const c = new Chess(), fens = [c.fen()];
+    for (const s of g.sans) { if (!c.move(s, { sloppy: true })) break; fens.push(c.fen()); }
+    const mine = c.turn() === g.color[0], me = capRating(toLichessScale(g.me.rating, kind) + shift), op = capRating(toLichessScale(g.opp.rating, kind) + shift);
+    return { item: { fens: fens.slice(-8), eloSelf: mine ? me : op, eloOppo: mine ? op : me }, mine };
+  });
+  const fp = await maia.predict(finals.map(f => f.item), { shouldAbort });
+  const at = finals.map((f, i) => (f.mine ? fp[i].value : 1 - fp[i].value)).filter(v => Number.isFinite(v));
+  return { tailRate, resign: at.length ? { below: clamp(median(at), 0.02, 0.3), after: 2, share } : null };
+}
+
+// A move from the tail, as often as the player plays one (see playerHabits); otherwise the chosen move
+function withTail(bot, moves, pick) {
+  if (!bot.tailRate || !moves?.length || Math.random() >= bot.tailRate) return pick;
+  const short = new Set(fidCandidates(moves).map(m => m.uci)), tail = moves.filter(m => !short.has(m.uci));
+  if (!tail.length) return pick;
+  let r = Math.random() * sum(tail.map(m => m.p));
+  for (const m of tail) { r -= m.p; if (r <= 0) return m; }
+  return tail[0];
 }
 
 // High fidelity (js/fidelity.js): fit the move-quality calibration on the positions where the bot really uses

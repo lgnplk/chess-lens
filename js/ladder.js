@@ -271,9 +271,12 @@ async function addToStack(el, item) {
   fillShapeCard(el);
 }
 
-// A bot's own games, for its radars: it plays a plain Maia-3 opponent of its own strength (the kind of player it would
-// meet), colours alternating, through the arena's match engine; then it is measured as a legend is (all its games;
-// no clocks, so no time trouble). Legends, your arena bots, and the Your bot page's bot.
+// A bot's own games, for its radars: colours alternating, through the arena's match engine, against opponents like the
+// player's real ones: Maia-3 at their opponents' median rating (on the bot's fitted scale) choosing among all its moves
+// in proportion, so it now and then plays the wild move a real opponent would. (Against Maia at the bot's own, higher
+// fitted rating, trimmed to its likely moves, a club player's bot met cleaner play than the player does: calmer games,
+// higher accuracy, fewer comebacks.) Then it is measured as a legend is (all its games; no clocks, so no time trouble).
+// Legends, your arena bots, and the Your bot page's bot.
 async function stackBotGames(el, item) {
   const note = m => { item.msg = String(m).replace(/<[^>]+>/g, ''); const s = $(`[data-sr="${ladderState.stack.indexOf(item)}"] .sr-load`, shapeLive(el)); if (s) s.textContent = item.msg; };
   let bot;
@@ -281,7 +284,9 @@ async function stackBotGames(el, item) {
     if (!botv.model) throw new Error('build a bot on Bots › Your bot first');
     bot = Object.assign(Object.create(botv.model), { label: botv.model.label, mode: 'sample', guard: { moves: 0, flagged: 0, kept: 0 } });
   } else bot = await ensureBot(item.id, note);
-  const opp = { label: 'Maia', maia: bot.maia, playRating: bot.playRating, trees: { white: new Map(), black: new Map() }, mode: 'sample' };
+  const oppRatings = (bot.games || []).map(g => toLichessScale(g.opp?.rating, bot.kind)).filter(Boolean);
+  const oppRating = oppRatings.length ? capRating(median(oppRatings) + (bot.shift || 0)) : bot.playRating;
+  const opp = { label: 'Maia', maia: bot.maia, playRating: oppRating, trees: { white: new Map(), black: new Map() }, mode: 'sample', fullSample: true };
   let done = 0;
   note(`playing ${item.nGames} games…`);
   const games = await playGames(Array.from({ length: item.nGames }, (_, i) => (i % 2 ? { white: opp, black: bot } : { white: bot, black: opp })), bot.maia,
@@ -290,10 +295,10 @@ async function stackBotGames(el, item) {
   item.data = { label: item.label, games: games.map((g, i) => {
     const color = g.white === bot ? 'white' : 'black', won = g.result === (color === 'white' ? '1-0' : '0-1');
     return { id: `botgame:${hashStr(`${item.label}|${color}|${g.sans.join(' ')}`)}`, sans: [...g.sans], plies: g.sans.length, clocks: [], base: null, color, rated: true, timeClass: '*',
-      me: { name: item.label, rating: bot.playRating }, opp: { name: 'Maia', rating: bot.playRating }, result: g.result === '1/2-1/2' ? 'draw' : won ? 'win' : 'loss', reason: g.reason,
+      me: { name: item.label, rating: bot.playRating }, opp: { name: 'Maia', rating: oppRating }, result: g.result === '1/2-1/2' ? 'draw' : won ? 'win' : 'loss', reason: g.reason,
       opening: '', eco: '', url: null, end: new Date((t - games.length + i) * 1000), endTs: t - games.length + i };
   }) };
-  item.rating = bot.playRating;
+  Object.assign(item, { rating: bot.playRating, oppRating });
 }
 
 // their engine numbers: Stockfish over their latest n games (in the chip's time control; all of a legend's),
@@ -514,7 +519,7 @@ async function fillShapeCard(el) {
       : it.fetching ? `<span class="muted small sr-load">${esc(it.fetching.msg)}</span>`
       : `<span class="sr-an-wrap">${it.aggN && it.aggTc === it.tc ? `<span class="muted small">${it.aggN} analysed</span>` : ''}<input type="range" class="sr-n" min="1" max="${top}" value="${nPick}" title="How many of their latest ${ownGames(it) ? '' : it.tc + ' '}games"><span class="small sr-nv">${nPick}</span><button class="btn small-btn sr-an">${it.aggN && it.aggTc === it.tc ? 'Re-analyze' : 'Analyze'}</button></span>`;
     chips.push(`<span class="sr-chip" data-sr="${i}"><i style="background:var(${color})"></i>${esc(it.label)}${it.kind === 'legend' ? ` <span class="muted small" title="Classical over-the-board games, placed among online players of this time control">classical, as</span>`
-      : it.kind === 'bot' ? ` <span class="muted small" title="Games it played against Maia-3 of its own strength (~${it.rating}), placed among online players of this time control">${it.data.games.length} games vs Maia, as</span>` : ''}${tcSelect('sr-tc', tcs, it.tc)}${engine}${x}</span>`);
+      : it.kind === 'bot' ? ` <span class="muted small" title="Games it played (as ~${it.rating}) against Maia-3 at its player's typical opponents' level (~${it.oppRating}), placed among online players of this time control">${it.data.games.length} games vs Maia, as</span>` : ''}${tcSelect('sr-tc', tcs, it.tc)}${engine}${x}</span>`);
   });
   slot(el, 'shape-series').innerHTML = `<span class="sr-chip sr-you"><i style="background:var(--s1)"></i>You${tcSelect('sr-mytc', myTcs, myTc)}</span>
     <span class="muted small">vs</span>${chips.join('')}${stack.length < STACK_MAX ? '<button class="btn small-btn sr-add">+ Add</button>' : ''}`;

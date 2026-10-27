@@ -123,8 +123,9 @@ blitz and rapid, built once by `tools/build-ladder.js` (52,462 players) and ship
   inverted (fewer, smaller swings = outward).
 - **Where it shows.** Insights: the Shape radars (you vs a band's typical player, a chess.com player with your record
   against them, a legend, or a bot) and By rating. A bot (a legend's, one of your arena bots, or the Your bot page's)
-  plays 20, 40 or 80 games against Maia-3 of its own strength and is measured from them like a player, so it stands
-  beside the person it imitates (no clocks: no time trouble). The **Performance** radar is a rating scale, linear from
+  plays 20, 40 or 80 games against Maia-3 at the median rating of its player's real opponents, choosing among all its
+  moves in proportion (as real opponents' occasional wild moves), and is measured from them like a player, so it
+  stands beside the person it imitates (no clocks: no time trouble). The **Performance** radar is a rating scale, linear from
   0 at the centre: each value sits at the rating whose typical player (in that series' time control) scores the same,
   so a band's typical player is a regular polygon at its rating; the rim is 3,000 (the clean step above the strongest
   rapid band's typical player, about 2,800). Past the strongest band the rating is extrapolated from the last bands'
@@ -299,6 +300,15 @@ The bot tries to play the move a specific player would play.
   makes the kind of mistakes the player makes.
 - **Fidelity:** *High* (the default) calibrates the bot to the player's real accuracy with Stockfish (below);
   *Standard* is Maia alone, which is fast. Up to 300 games can be used; more games give a sharper calibration.
+- **Habits outside the model** (`playerHabits` in `js/bot.js`), measured on the player's games: how often they play a
+  move off the bot's shortlist (Maia's top 3 and anything ≥0.5%: often the wildest blunders; a 600-rated blitz player:
+  2.5% of moves), which the bot then does as often (its blunder check doesn't veto these); and, for players who resign
+  a quarter or more of their lost games, the chance (Maia's estimate) at which they resign, where the bot resigns too.
+- **What it changed** (a 600 chess.com blitz player's bot, 40 games against opponents like theirs vs the player's last
+  40): blunders per 100 moves 6.0 → 7.9 (the player: 7.5), accuracy 80.4 → 72.9% (75.4%), resilience (score
+  from −3) 22 → 31% (41%), resigned games 5 → 15 (18). Move by move the bot picks the player's real move about as often as plain Maia at
+  their rating (49% on held-out games): a bot captures how well and how often someone errs, their openings and these
+  habits, more than their individual move choices, which a couple of hundred games can't teach a model of this kind.
 
 ### High fidelity (`js/fidelity.js`)
 

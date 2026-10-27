@@ -117,7 +117,9 @@ async function plBotMove() {
     const dist = await botDistribution(bot, fens);
     if (token !== pl.token) return;
     const mode = bot.mode || 'sample';
-    const pick = bot.fidelity && dist.source === 'maia' ? (await fidChoose(bot, dist.moves, fen, pl.engine, mode)).move : await botPick(bot, dist, mode, fen, pl.engine);
+    let pick = bot.fidelity && dist.source === 'maia' ? (await fidChoose(bot, dist.moves, fen, pl.engine, mode)).move : await botPick(bot, dist, mode, fen, pl.engine);
+    // a player bot now and then plays off Maia's shortlist, as often as its player does (js/bot.js playerHabits)
+    if (dist.source === 'maia' && mode === 'sample') pick = withTail(bot, dist.moves, pick);
     if (token !== pl.token) return;
     await sleep(250 + Math.random() * 350);
     if (token !== pl.token) return;
