@@ -349,8 +349,6 @@ function renderAnalytics(sec, games) {
   const m = an.material;
   sec.innerHTML = `
     <div class="tiles">
-      ${tile('Up 3+ material', pct(m.ahead.score), `your score · ${m.ahead.n} games`)}
-      ${tile('Down 3+ material', pct(m.behind.score), `your score · ${m.behind.n} games`)}
       ${tile('Time-trouble games', an.timeTrouble.rate != null ? pct(an.timeTrouble.rate) : '–', an.timeTrouble.n ? `score ${pct(an.timeTrouble.score)} in them` : '')}
       ${tile('Timeouts while ahead', m.lostOnTimeAhead, 'losses on time up 2+ material')}
       ${tile('After 2 straight losses', pct(an.afterTwoLosses.score), `${an.afterTwoLosses.n} games · ${signed(an.afterTwoLosses.over)} vs exp.`)}

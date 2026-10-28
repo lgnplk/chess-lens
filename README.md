@@ -109,7 +109,7 @@ blitz and rapid, built once by `tools/build-ladder.js` (52,462 players) and ship
   50 games of habits and 20 games through Stockfish 19 (depth 12, top 3 lines: the app's own scan). Both sides of
   every game count, so each band holds thousands of players.
 - **What is measured.** Style: checks, captures, pawn moves, early castling, early queen, time trouble.
-  Performance: accuracy, blunders, resilience (score from −3), brilliance (sound
+  Performance: accuracy, blunders, brilliance (sound
   sacrifices taken and hard refutations found), consistency (game-to-game swing in accuracy) and clutch (only
   moves found), each counted exactly as the app counts your scanned games.
 - **Noise removed.** A player's numbers from a few games are their real level plus luck. The game-to-game swing is
@@ -305,8 +305,8 @@ The bot tries to play the move a specific player would play.
   2.5% of moves), which the bot then does as often (its blunder check doesn't veto these); and, for players who resign
   a quarter or more of their lost games, the chance (Maia's estimate) at which they resign, where the bot resigns too.
 - **What it changed** (a 600 chess.com blitz player's bot, 40 games against opponents like theirs vs the player's last
-  40): blunders per 100 moves 6.0 → 7.9 (the player: 7.5), accuracy 80.4 → 72.9% (75.4%), resilience (score
-  from −3) 22 → 31% (41%), resigned games 5 → 15 (18). Move by move the bot picks the player's real move about as often as plain Maia at
+  40): blunders per 100 moves 6.0 → 7.9 (the player: 7.5), accuracy 80.4 → 72.9% (75.4%), score
+  after falling 3 behind 22 → 31% (41%), resigned games 5 → 15 (18). Move by move the bot picks the player's real move about as often as plain Maia at
   their rating (49% on held-out games): a bot captures how well and how often someone errs, their openings and these
   habits, more than their individual move choices, which a couple of hundred games can't teach a model of this kind.
 

@@ -177,8 +177,6 @@ function computeAnalytics(games) {
   });
   const timeTrouble = timed.filter(g => g.f.timeTrouble);
   const material = {
-    ahead: statRow(games.filter(g => g.f?.maxAdv >= 3)),
-    behind: statRow(games.filter(g => g.f?.maxDef <= -3)),
     lostOnTimeAhead: games.filter(g => g.result === 'loss' && g.reason === 'timeout' && g.f?.finalMat >= 2).length,
   };
   // monthly
@@ -214,13 +212,9 @@ function aggregateScan(results) {
     const ms = analysis.moves.filter(m => m.color === c);
     myMoves.push(...ms.map(m => ({ ...m, game })));
     oppMoves.push(...analysis.moves.filter(m => m.color !== c));
-    // eval swings from my POV
-    const sign = c === 'w' ? 1 : -1;
-    const evs = analysis.evals.map(e => evalToCp(e) * sign);
     perGame.push({
       game, acc: analysis.summary[c].accuracy, oppAcc: analysis.summary[c === 'w' ? 'b' : 'w'].accuracy,
       acpl: analysis.summary[c].acpl, counts: analysis.summary[c].counts,
-      maxEval: Math.max(...evs), minEval: Math.min(...evs),
       // blunders (20+ win-% points lost) per counted move, for both sides, as the ladder counts them
       ...Object.fromEntries([['my', c], ['opp', c === 'w' ? 'b' : 'w']].flatMap(([who, side]) => {
         const counted = analysis.moves.filter(m => m.color === side && m.cls !== 'book' && m.cls !== 'forced');
@@ -253,7 +247,6 @@ function aggregateScan(results) {
   myMoves.filter(m => m.cls === 'blunder' || m.cls === 'mistake').forEach(m => { blunderPieces[m.piece] = (blunderPieces[m.piece] || 0) + 1; });
   const movesPerPiece = {};
   myMoves.forEach(m => { movesPerPiece[m.piece] = (movesPerPiece[m.piece] || 0) + 1; });
-  const losing = perGame.filter(p => p.minEval <= -300);
   const byOpening = [...groupBy(perGame, p => `${p.game.color}|${p.game.family}`)].map(([k, ps]) => ({ name: k.slice(k.indexOf('|') + 1), color: ps[0].game.color, n: ps.length, acc: mean(ps.map(p => p.acc)), score: mean(ps.map(p => scoreOf(p.game))) }))
     .sort((a, b) => b.n - a.n);
   const byTC = [...groupBy(perGame, p => p.game.timeClass)].map(([name, ps]) => ({ name, n: ps.length, acc: mean(ps.map(p => p.acc)) }));
@@ -263,7 +256,6 @@ function aggregateScan(results) {
   return {
     n: perGame.length, nMoves: myMoves.length, myMoves, perGame, phaseStats, phaseVs, pressure, blunderPieces, movesPerPiece, totals, brilliantCheck,
     acc: mean(perGame.map(p => p.acc)), oppAcc: mean(perGame.map(p => p.oppAcc)), acpl: mean(perGame.map(p => p.acpl)),
-    defense: { n: losing.length, score: losing.length ? mean(losing.map(p => scoreOf(p.game))) : null },
     byOpening, byTC,
     style: { me: aggregateStyle(recsMe), opp: aggregateStyle(recsOpp) }, brilliantMoves,
     worstMoves: myMoves.filter(m => m.cls === 'blunder').sort((a, b) => b.loss - a.loss).slice(0, 12),
@@ -325,17 +317,6 @@ function computeReport(games, scan) {
     if (an.timeTrouble.rate >= 0.3 && an.timeTrouble.n >= 5 && an.timeTrouble.score < an.timeTrouble.noTrouble.score - 0.08 && sigDiff(an.timeTrouble.score - an.timeTrouble.noTrouble.score, an.timeTrouble.n, an.timeTrouble.noTrouble.n))
       add('weakness', 'Time trouble costs you points', `${pct(an.timeTrouble.rate)} of games · score ${pct(an.timeTrouble.score)} vs ${pct(an.timeTrouble.noTrouble.score)}`, 'Play the opening faster — you likely know it — and save time for critical middlegame moments.', 3);
     if (an.timeTrouble.rate < 0.12) add('strength', 'Good clock management', `Time trouble in ${pct(an.timeTrouble.rate)} of games`, '', 1);
-  }
-
-  // Material conversion / comeback
-  const m = an.material;
-  if (m.ahead.n >= 8 && !scan) {
-    if (m.ahead.score >= 0.88) add('strength', 'Clinical when ahead on material', `${pct(m.ahead.score)} when 3+ up · ${m.ahead.n} games`, '', 2);
-    else if (m.ahead.score < 0.78) add('weakness', 'Letting winning positions slip', `${pct(m.ahead.score)} when 3+ up · ${m.ahead.n} games`, 'When ahead: trade pieces, kill counterplay.', (0.88 - m.ahead.score) * 10);
-  }
-  if (m.behind.n >= 8 && !scan) {
-    if (m.behind.score >= 0.3) add('strength', 'Resourceful defender', `${pct(m.behind.score)} when 3+ down · ${m.behind.n} games`, '', 1.5);
-    else if (m.behind.score <= 0.1) add('note', 'Few comebacks when behind', `${pct(m.behind.score)} when 3+ down · ${m.behind.n} games`, 'When behind, complicate.', 0.8);
   }
 
   // Tilt

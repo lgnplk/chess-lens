@@ -25,7 +25,6 @@ const LADDER_STYLE = [
 const LADDER_PERF = [
   ladderAxis('accuracy', 'Accuracy', v => num(v, 1) + '%', ''),
   ladderAxis('blunders', 'Few blunders', v => num(v, 1), '/100 moves', { row: 'Blunders', invert: true }),
-  ladderAxis('resilience', 'Resilience', v => num(v, 0) + '%', 'scored from −3'),
   ladderAxis('brilliance', 'Brilliance', v => num(v, 0) + '%', 'sound sacs and hard refutations found'),
   ladderAxis('consistency', 'Consistency', v => '±' + num(v, 1), 'accuracy, game to game', { row: 'Game-to-game swing', invert: true }),
   ladderAxis('clutch', 'Clutch', v => num(v, 0) + '%', 'of only moves found'),
@@ -57,20 +56,17 @@ function ladderPerf(agg, tc) {
   if (!pg.length) return null;
   const S1 = f => sum(pg.map(f)), counted = S1(p => p.myCounted || 0);
   const accs = pg.map(p => p.acc), m = mean(accs);
-  const lose = pg.filter(p => p.minEval <= -300);
-  const score = list => 100 * mean(list.map(p => scoreOf(p.game)));
   const [ck, cn] = [0, 1].map(i => S1(p => p.myCrit?.[i] || 0)), [bk, bn] = [0, 1].map(i => S1(p => p.myBril?.[i] || 0));
   const enough = pg.length >= 3 && counted >= 20;
   return {
     vals: {
       accuracy: enough ? ladderCalibrate('accuracy', m) : null,
       blunders: enough ? ladderCalibrate('blunders', 100 * S1(p => p.myBl || 0) / counted) : null,
-      resilience: lose.length >= 5 ? score(lose) : null,
       brilliance: bn >= 10 ? 100 * bk / bn : null,
       consistency: pg.length >= 8 ? Math.sqrt(sum(accs.map(x => (x - m) ** 2)) / (pg.length - 1)) : null,
       clutch: cn >= 10 ? 100 * ck / cn : null,
     },
-    n: { accuracy: pg.length, blunders: counted, resilience: lose.length, brilliance: bn, consistency: pg.length, clutch: cn },
+    n: { accuracy: pg.length, blunders: counted, brilliance: bn, consistency: pg.length, clutch: cn },
   };
 }
 
@@ -131,10 +127,8 @@ const valTip = (a, label, v) => `${label}: ${v != null ? a.fmt(v) : '–'}`;
 // A percentile squeezes the strong end together (80% and 99% accuracy are both "top few percent"), so the
 // Performance radar instead places each value at the rating whose typical player has it: the band medians,
 // made monotone in rating (pool adjacent violators) and joined linearly, extended past the end bands along
-// their trend. The distance between two players then reads as a rating gap. Resilience falls as rating rises
-// (stronger opponents convert better), so it has no rating equivalent and stays off the radar.
+// their trend. The distance between two players then reads as a rating gap.
 const RATING_MAX = 3500;
-const PERF_RADAR = LADDER_PERF.filter(a => a.key !== 'resilience');
 const _curves = new WeakMap();
 function ladderCurve(T, a) {
   let c = _curves.get(T);
@@ -547,7 +541,7 @@ async function fillShapeCard(el) {
     slot(el, 'perf-mode').innerHTML = `<div class="seg" title="Estimate: a short record is pulled toward the typical player of its rating, by how much of it could be luck">${[['est', 'Estimate'], ['raw', 'As measured']].map(([k, l]) => `<button data-perf-mode="${k}" class="${(ladderState.perfRaw ? 'raw' : 'est') === k ? 'active' : ''}">${l}</button>`).join('')}</div>`;
     slot(el, 'perf-note').textContent = ladderState.perfRaw ? 'Rings: rating · each value at the rating whose typical player scores the same · exactly as measured, luck included'
       : 'Rings: rating · each value at the rating whose typical player scores the same · few games are pulled toward the typical player of their rating';
-    shapePane(el, 'perfRadar', 'perf-bars', PERF_RADAR, perfSeries, 'rating');
+    shapePane(el, 'perfRadar', 'perf-bars', LADDER_PERF, perfSeries, 'rating');
   } else {
     slot(el, 'perf-mode').innerHTML = '';
     slot(el, 'perf-bars').innerHTML = '';

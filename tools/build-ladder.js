@@ -230,7 +230,6 @@ LB.start = async (opts = {}) => {
 const METRICS = {
   accuracy:    { rows: 'e', of: r => [r[0], 1], scale: 1, kind: 'rate' },
   blunders:    { rows: 'e', of: r => [r[1], r[2]], scale: 100, kind: 'rate' },
-  resilience:  { rows: 'e', of: r => (r[4] ? [r[5], 1] : null), scale: 100, kind: 'binary' },
   brilliance:  { rows: 'e', of: r => (r[9] ? [r[8], r[9]] : null), scale: 100, kind: 'binary' },
   clutch:      { rows: 'e', of: r => (r[7] ? [r[6], r[7]] : null), scale: 100, kind: 'binary' },
   consistency: { rows: 'e', scale: 1, kind: 'spread' },
